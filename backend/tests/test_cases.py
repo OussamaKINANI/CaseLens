@@ -86,3 +86,33 @@ def test_list_cases(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert len(response.json()) == 2
+
+def test_create_case_records_audit_event(
+    client: TestClient,
+) -> None:
+    created_response = client.post(
+        "/v1/cases",
+        json={
+            "patient_external_id": "SYNTH-AUDIT-001",
+            "requested_service": "Cardiac MRI",
+            "priority": "urgent",
+        },
+    )
+
+    assert created_response.status_code == 201
+
+    case_id = created_response.json()["id"]
+    audit_response = client.get(f"/v1/cases/{case_id}/audit")
+
+    assert audit_response.status_code == 200
+
+    events = audit_response.json()
+
+    assert len(events) == 1
+    assert events[0]["case_id"] == case_id
+    assert events[0]["event_type"] == "case_created"
+    assert events[0]["actor_type"] == "system"
+    assert events[0]["details"] == {
+        "initial_status": "received",
+        "priority": "urgent",
+    }

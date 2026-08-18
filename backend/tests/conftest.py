@@ -10,6 +10,8 @@ from app.database import get_database_session
 from app.main import app
 from app.models import CaseRecord
 
+from app.audit_models import AuditEventRecord
+
 
 test_engine = create_engine(
     settings.test_database_url,
@@ -25,6 +27,7 @@ TestSessionLocal = sessionmaker(
 
 def clear_test_database() -> None:
     with TestSessionLocal() as session:
+        session.execute(delete(AuditEventRecord))
         session.execute(delete(CaseRecord))
         session.commit()
 

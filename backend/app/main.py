@@ -8,6 +8,12 @@ from sqlalchemy.orm import Session
 from app.database import get_database_session
 from app.models import CaseRecord
 from app.schemas import CaseCreate, CaseRead, CaseStatus
+from app.audit_models import AuditEventRecord
+from app.audit_schemas import (
+    AuditActorType,
+    AuditEventRead,
+    AuditEventType,
+)
 
 
 app = FastAPI(
@@ -61,11 +67,23 @@ def create_case(
     )
 
     database.add(case)
+    database.flush()
+
+    audit_event = AuditEventRecord(
+        case_id=case.id,
+        event_type=AuditEventType.case_created.value,
+        actor_type=AuditActorType.system.value,
+        details={
+            "initial_status": case.status,
+            "priority": case.priority,
+        },
+    )
+
+    database.add(audit_event)
     database.commit()
     database.refresh(case)
 
     return case
-
 
 @app.get(
     "/v1/cases",
@@ -100,3 +118,31 @@ def get_case(
         )
 
     return case
+
+@app.get(
+    "/v1/cases/{case_id}/audit",
+    response_model=list[AuditEventRead],
+    tags=["audit"],
+)
+def list_case_audit_events(
+    case_id: UUID,
+    database: Session = Depends(get_database_session),
+) -> list[AuditEventRecord]:
+    case = database.get(CaseRecord, case_id)
+
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+
+    statement = (
+        select(AuditEventRecord)
+        .where(AuditEventRecord.case_id == case_id)
+        .order_by(
+            AuditEventRecord.created_at.asc(),
+            AuditEventRecord.id.asc(),
+        )
+    )
+
+    return list(database.scalars(statement).all())
