@@ -280,3 +280,34 @@ def test_rejects_duplicate_document(
 
     assert first_response.status_code == 201
     assert second_response.status_code == 409
+
+def test_list_clinical_documents_hides_content(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/v1/cases",
+        json={
+            "patient_external_id": "SYNTH-DOC-004",
+            "requested_service": "Lumbar spine MRI",
+        },
+    ).json()
+
+    client.post(
+        f"/v1/cases/{created['id']}/documents",
+        files={
+            "file": (
+                "note.txt",
+                b"Synthetic clinical note",
+                "text/plain",
+            ),
+        },
+    )
+
+    response = client.get(
+        f"/v1/cases/{created['id']}/documents"
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["filename"] == "note.txt"
+    assert "content" not in response.json()[0]

@@ -326,3 +326,31 @@ def upload_clinical_document(
 
     database.refresh(document)
     return document
+
+@app.get(
+    "/v1/cases/{case_id}/documents",
+    response_model=list[ClinicalDocumentRead],
+    tags=["documents"],
+)
+def list_clinical_documents(
+    case_id: UUID,
+    database: Session = Depends(get_database_session),
+) -> list[ClinicalDocumentRecord]:
+    case = database.get(CaseRecord, case_id)
+
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+
+    statement = (
+        select(ClinicalDocumentRecord)
+        .where(ClinicalDocumentRecord.case_id == case_id)
+        .order_by(
+            ClinicalDocumentRecord.uploaded_at.asc(),
+            ClinicalDocumentRecord.id.asc(),
+        )
+    )
+
+    return list(database.scalars(statement).all())
