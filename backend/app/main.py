@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, status
-
+from fastapi import FastAPI, HTTPException, status
 from app.schemas import CaseCreate, CaseRead, CaseStatus
 
 
@@ -39,4 +38,29 @@ def create_case(payload: CaseCreate) -> CaseRead:
     )
 
     cases[case.id] = case
+    return case
+
+@app.get(
+    "/v1/cases",
+    response_model=list[CaseRead],
+    tags=["cases"],
+)
+def list_cases() -> list[CaseRead]:
+    return list(cases.values())
+
+
+@app.get(
+    "/v1/cases/{case_id}",
+    response_model=CaseRead,
+    tags=["cases"],
+)
+def get_case(case_id: UUID) -> CaseRead:
+    case = cases.get(case_id)
+
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+
     return case

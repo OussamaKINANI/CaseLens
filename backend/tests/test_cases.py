@@ -1,8 +1,8 @@
-from uuid import UUID
-
+from uuid import UUID, uuid4
 from fastapi.testclient import TestClient
 
 from app.main import app
+
 
 
 client = TestClient(app)
@@ -43,3 +43,50 @@ def test_create_case_rejects_invalid_data() -> None:
 
     assert response.status_code == 422
     assert "detail" in response.json()
+
+
+def test_get_case_by_id() -> None:
+    created_response = client.post(
+        "/v1/cases",
+        json={
+            "patient_external_id": "SYNTH-002",
+            "requested_service": "Knee MRI",
+            "priority": "routine",
+        },
+    )
+
+    case_id = created_response.json()["id"]
+
+    response = client.get(f"/v1/cases/{case_id}")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == case_id
+    assert response.json()["requested_service"] == "Knee MRI"
+
+
+def test_get_missing_case_returns_404() -> None:
+    missing_case_id = uuid4()
+
+    response = client.get(f"/v1/cases/{missing_case_id}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Case not found"}
+
+
+def test_list_cases() -> None:
+    for external_id in ["SYNTH-001", "SYNTH-002"]:
+        response = client.post(
+            "/v1/cases",
+            json={
+                "patient_external_id": external_id,
+                "requested_service": "Lumbar spine MRI",
+                "priority": "routine",
+            },
+        )
+
+        assert response.status_code == 201
+
+    response = client.get("/v1/cases")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
