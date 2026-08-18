@@ -1,14 +1,10 @@
 from uuid import UUID, uuid4
 from fastapi.testclient import TestClient
 
-from app.main import app
 
 
 
-client = TestClient(app)
-
-
-def test_create_case() -> None:
+def test_create_case(client: TestClient) -> None:
     response = client.post(
         "/v1/cases",
         json={
@@ -30,7 +26,7 @@ def test_create_case() -> None:
     assert body["created_at"]
 
 
-def test_create_case_rejects_invalid_data() -> None:
+def test_create_case_rejects_invalid_data(client: TestClient) -> None:
     response = client.post(
         "/v1/cases",
         json={
@@ -45,7 +41,7 @@ def test_create_case_rejects_invalid_data() -> None:
     assert "detail" in response.json()
 
 
-def test_get_case_by_id() -> None:
+def test_get_case_by_id(client: TestClient) -> None:
     created_response = client.post(
         "/v1/cases",
         json={
@@ -64,7 +60,7 @@ def test_get_case_by_id() -> None:
     assert response.json()["requested_service"] == "Knee MRI"
 
 
-def test_get_missing_case_returns_404() -> None:
+def test_get_missing_case_returns_404(client: TestClient) -> None:
     missing_case_id = uuid4()
 
     response = client.get(f"/v1/cases/{missing_case_id}")
@@ -73,7 +69,7 @@ def test_get_missing_case_returns_404() -> None:
     assert response.json() == {"detail": "Case not found"}
 
 
-def test_list_cases() -> None:
+def test_list_cases(client: TestClient) -> None:
     for external_id in ["SYNTH-001", "SYNTH-002"]:
         response = client.post(
             "/v1/cases",

@@ -1,12 +1,12 @@
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_database_session
+from app.models import CaseRecord
 from app.schemas import CaseCreate, CaseRead, CaseStatus
 
 
@@ -15,9 +15,6 @@ app = FastAPI(
     description="Evidence-grounded clinical case review API",
     version="0.1.0",
 )
-
-
-cases: dict[UUID, CaseRead] = {}
 
 
 @app.get("/health", tags=["system"])
@@ -52,15 +49,21 @@ def readiness_check(
     status_code=status.HTTP_201_CREATED,
     tags=["cases"],
 )
-def create_case(payload: CaseCreate) -> CaseRead:
-    case = CaseRead(
-        id=uuid4(),
-        status=CaseStatus.received,
-        created_at=datetime.now(timezone.utc),
-        **payload.model_dump(),
+def create_case(
+    payload: CaseCreate,
+    database: Session = Depends(get_database_session),
+) -> CaseRecord:
+    case = CaseRecord(
+        patient_external_id=payload.patient_external_id,
+        requested_service=payload.requested_service,
+        priority=payload.priority.value,
+        status=CaseStatus.received.value,
     )
 
-    cases[case.id] = case
+    database.add(case)
+    database.commit()
+    database.refresh(case)
+
     return case
 
 
@@ -69,8 +72,14 @@ def create_case(payload: CaseCreate) -> CaseRead:
     response_model=list[CaseRead],
     tags=["cases"],
 )
-def list_cases() -> list[CaseRead]:
-    return list(cases.values())
+def list_cases(
+    database: Session = Depends(get_database_session),
+) -> list[CaseRecord]:
+    statement = select(CaseRecord).order_by(
+        CaseRecord.created_at.desc(),
+    )
+
+    return list(database.scalars(statement).all())
 
 
 @app.get(
@@ -78,8 +87,11 @@ def list_cases() -> list[CaseRead]:
     response_model=CaseRead,
     tags=["cases"],
 )
-def get_case(case_id: UUID) -> CaseRead:
-    case = cases.get(case_id)
+def get_case(
+    case_id: UUID,
+    database: Session = Depends(get_database_session),
+) -> CaseRecord:
+    case = database.get(CaseRecord, case_id)
 
     if case is None:
         raise HTTPException(
