@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.database import get_database_session
 from app.schemas import CaseCreate, CaseRead, CaseStatus
 
 
@@ -23,6 +28,24 @@ def health_check() -> dict[str, str]:
     }
 
 
+@app.get("/ready", tags=["system"])
+def readiness_check(
+    database: Session = Depends(get_database_session),
+) -> dict[str, str]:
+    try:
+        database.execute(text("SELECT 1"))
+    except SQLAlchemyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from error
+
+    return {
+        "status": "ready",
+        "database": "reachable",
+    }
+
+
 @app.post(
     "/v1/cases",
     response_model=CaseRead,
@@ -39,6 +62,7 @@ def create_case(payload: CaseCreate) -> CaseRead:
 
     cases[case.id] = case
     return case
+
 
 @app.get(
     "/v1/cases",
