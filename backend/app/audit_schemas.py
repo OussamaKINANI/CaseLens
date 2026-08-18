@@ -13,6 +13,7 @@ class AuditEventType(str, Enum):
     ai_review_completed = "ai_review_completed"
     human_review_completed = "human_review_completed"
     processing_failed = "processing_failed"
+    document_uploaded = "document_uploaded"
 
 
 class AuditActorType(str, Enum):

@@ -12,6 +12,8 @@ from app.models import CaseRecord
 
 from app.audit_models import AuditEventRecord
 
+from app.document_models import ClinicalDocumentRecord
+
 
 test_engine = create_engine(
     settings.test_database_url,
@@ -28,9 +30,9 @@ TestSessionLocal = sessionmaker(
 def clear_test_database() -> None:
     with TestSessionLocal() as session:
         session.execute(delete(AuditEventRecord))
+        session.execute(delete(ClinicalDocumentRecord))
         session.execute(delete(CaseRecord))
         session.commit()
-
 
 @pytest.fixture
 def client() -> Generator[TestClient, None, None]:

@@ -177,3 +177,106 @@ def test_invalid_status_transition_returns_conflict(
     assert response.json()["detail"] == (
         "Cannot transition case from received to completed"
     )
+
+def test_upload_clinical_document(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/v1/cases",
+        json={
+            "patient_external_id": "SYNTH-DOC-001",
+            "requested_service": "Cardiac MRI",
+            "priority": "routine",
+        },
+    ).json()
+
+    note = (
+        b"Synthetic clinical note. "
+        b"Patient completed six weeks of physical therapy."
+    )
+
+    response = client.post(
+        f"/v1/cases/{created['id']}/documents",
+        files={
+            "file": (
+                "clinical-note.txt",
+                note,
+                "text/plain",
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+
+    body = response.json()
+
+    assert body["case_id"] == created["id"]
+    assert body["filename"] == "clinical-note.txt"
+    assert body["media_type"] == "text/plain"
+    assert body["size_bytes"] == len(note)
+    assert len(body["content_sha256"]) == 64
+    assert "content" not in body
+
+    events = client.get(
+        f"/v1/cases/{created['id']}/audit"
+    ).json()
+
+    assert events[-1]["event_type"] == "document_uploaded"
+
+
+def test_rejects_unsupported_document_type(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/v1/cases",
+        json={
+            "patient_external_id": "SYNTH-DOC-002",
+            "requested_service": "Cardiac MRI",
+        },
+    ).json()
+
+    response = client.post(
+        f"/v1/cases/{created['id']}/documents",
+        files={
+            "file": (
+                "record.pdf",
+                b"not a real PDF",
+                "application/pdf",
+            ),
+        },
+    )
+
+    assert response.status_code == 415
+
+
+def test_rejects_duplicate_document(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/v1/cases",
+        json={
+            "patient_external_id": "SYNTH-DOC-003",
+            "requested_service": "Cardiac MRI",
+        },
+    ).json()
+
+    upload = {
+        "file": (
+            "note.txt",
+            b"Synthetic clinical record",
+            "text/plain",
+        ),
+    }
+
+    first_response = client.post(
+        f"/v1/cases/{created['id']}/documents",
+        files=upload,
+    )
+
+    second_response = client.post(
+        f"/v1/cases/{created['id']}/documents",
+        files=upload,
+    )
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 409
