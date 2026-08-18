@@ -24,12 +24,22 @@ class CaseCreate(BaseModel):
         str_strip_whitespace=True,
     )
 
-    patient_external_id: str = Field(min_length=1, max_length=100)
-    requested_service: str = Field(min_length=1, max_length=200)
+    patient_external_id: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    requested_service: str = Field(
+        min_length=1,
+        max_length=200,
+    )
+
     priority: CasePriority = CasePriority.routine
 
 
 class CaseRead(CaseCreate):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     status: CaseStatus
     created_at: datetime
