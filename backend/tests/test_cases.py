@@ -116,3 +116,64 @@ def test_create_case_records_audit_event(
         "initial_status": "received",
         "priority": "urgent",
     }
+
+def test_update_case_status_records_audit_event(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/v1/cases",
+        json={
+            "patient_external_id": "SYNTH-STATUS-001",
+            "requested_service": "Cardiac MRI",
+            "priority": "routine",
+        },
+    ).json()
+
+    response = client.patch(
+        f"/v1/cases/{created['id']}/status",
+        json={
+            "status": "processing",
+            "reason": "AI review started",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "processing"
+
+    events = client.get(
+        f"/v1/cases/{created['id']}/audit"
+    ).json()
+
+    assert len(events) == 2
+    assert events[1]["event_type"] == "status_changed"
+    assert events[1]["details"] == {
+        "previous_status": "received",
+        "new_status": "processing",
+        "reason": "AI review started",
+    }
+
+
+def test_invalid_status_transition_returns_conflict(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/v1/cases",
+        json={
+            "patient_external_id": "SYNTH-STATUS-002",
+            "requested_service": "Cardiac MRI",
+            "priority": "routine",
+        },
+    ).json()
+
+    response = client.patch(
+        f"/v1/cases/{created['id']}/status",
+        json={
+            "status": "completed",
+            "reason": "Attempted invalid transition",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Cannot transition case from received to completed"
+    )

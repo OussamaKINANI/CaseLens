@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_database_session
 from app.models import CaseRecord
-from app.schemas import CaseCreate, CaseRead, CaseStatus
+from app.schemas import (
+    CaseCreate,
+    CaseRead,
+    CaseStatus,
+    CaseStatusUpdate,
+)
 from app.audit_models import AuditEventRecord
 from app.audit_schemas import (
     AuditActorType,
@@ -21,6 +26,26 @@ app = FastAPI(
     description="Evidence-grounded clinical case review API",
     version="0.1.0",
 )
+
+ALLOWED_STATUS_TRANSITIONS: dict[CaseStatus, set[CaseStatus]] = {
+    CaseStatus.received: {
+        CaseStatus.processing,
+        CaseStatus.failed,
+    },
+    CaseStatus.processing: {
+        CaseStatus.awaiting_review,
+        CaseStatus.failed,
+    },
+    CaseStatus.awaiting_review: {
+        CaseStatus.processing,
+        CaseStatus.completed,
+        CaseStatus.failed,
+    },
+    CaseStatus.completed: set(),
+    CaseStatus.failed: {
+        CaseStatus.processing,
+    },
+}
 
 
 @app.get("/health", tags=["system"])
@@ -146,3 +171,52 @@ def list_case_audit_events(
     )
 
     return list(database.scalars(statement).all())
+
+@app.patch(
+    "/v1/cases/{case_id}/status",
+    response_model=CaseRead,
+    tags=["cases"],
+)
+def update_case_status(
+    case_id: UUID,
+    payload: CaseStatusUpdate,
+    database: Session = Depends(get_database_session),
+) -> CaseRecord:
+    case = database.get(CaseRecord, case_id)
+
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+
+    current_status = CaseStatus(case.status)
+    allowed_statuses = ALLOWED_STATUS_TRANSITIONS[current_status]
+
+    if payload.status not in allowed_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot transition case from "
+                f"{current_status.value} to {payload.status.value}"
+            ),
+        )
+
+    case.status = payload.status.value
+
+    audit_event = AuditEventRecord(
+        case_id=case.id,
+        event_type=AuditEventType.status_changed.value,
+        actor_type=AuditActorType.system.value,
+        details={
+            "previous_status": current_status.value,
+            "new_status": payload.status.value,
+            "reason": payload.reason,
+        },
+    )
+
+    database.add(audit_event)
+    database.commit()
+    database.refresh(case)
+
+    return case

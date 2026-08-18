@@ -43,3 +43,12 @@ class CaseRead(CaseCreate):
     id: UUID
     status: CaseStatus
     created_at: datetime
+
+class CaseStatusUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    status: CaseStatus
+    reason: str = Field(min_length=1, max_length=500)
