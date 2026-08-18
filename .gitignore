@@ -1,0 +1,36 @@
+# Python virtual environment
+.venv/
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Frontend-generated files
+node_modules/
+.next/
+dist/
+
+# Terraform-generated files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
