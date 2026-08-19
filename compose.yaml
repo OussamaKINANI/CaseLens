@@ -1,6 +1,6 @@
 services:
   database:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     container_name: caselens-postgres
     restart: unless-stopped
 
