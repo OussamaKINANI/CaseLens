@@ -12,6 +12,7 @@ from app import (
 
 from app.config import settings
 from app.database import Base
+from app import rag_models  # noqa: F401
 
 
 config = context.config
