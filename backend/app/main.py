@@ -1,7 +1,13 @@
 from fastapi import FastAPI
 
 from app.config import settings
-from app.routers import cases, documents, fhir, system
+from app.routers import (
+    cases,
+    documents,
+    extractions,
+    fhir,
+    system,
+)
 
 app = FastAPI(
     title=settings.app_name,
@@ -13,3 +19,4 @@ app.include_router(system.router)
 app.include_router(cases.router)
 app.include_router(documents.router)
 app.include_router(fhir.router)
+app.include_router(extractions.router)
