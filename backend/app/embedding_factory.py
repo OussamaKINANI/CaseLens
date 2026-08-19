@@ -45,3 +45,6 @@ def create_embedding_provider(
         "Unsupported embedding provider: "
         f"{selected_settings.embedding_provider}"
     )
+
+def get_embedding_provider() -> EmbeddingProvider:
+    return create_embedding_provider()

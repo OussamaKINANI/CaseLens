@@ -15,6 +15,10 @@ from app.audit_models import AuditEventRecord
 from app.document_models import ClinicalDocumentRecord
 from app.extraction_models import ClinicalExtractionRecord
 
+from app.embedding_factory import get_embedding_provider
+from app.embedding_service import FakeEmbeddingProvider
+from app.rag_models import DocumentChunkRecord
+
 
 test_engine = create_engine(
     settings.test_database_url,
@@ -31,6 +35,7 @@ TestSessionLocal = sessionmaker(
 def clear_test_database() -> None:
     with TestSessionLocal() as session:
         session.execute(delete(ClinicalExtractionRecord))
+        session.execute(delete(DocumentChunkRecord))
         session.execute(delete(AuditEventRecord))
         session.execute(delete(ClinicalDocumentRecord))
         session.execute(delete(CaseRecord))
@@ -46,7 +51,11 @@ def client() -> Generator[TestClient, None, None]:
     app.dependency_overrides[get_database_session] = (
         override_database_session
     )
-
+    app.dependency_overrides[get_embedding_provider] = (
+        lambda: FakeEmbeddingProvider(
+            dimensions=1536
+        )
+    )
     try:
         with TestClient(app) as test_client:
             yield test_client

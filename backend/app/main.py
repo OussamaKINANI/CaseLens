@@ -9,6 +9,15 @@ from app.routers import (
     system,
 )
 
+from app.routers import (
+    cases,
+    documents,
+    extractions,
+    fhir,
+    rag,
+    system,
+)
+
 app = FastAPI(
     title=settings.app_name,
     description="Evidence-grounded clinical case review API",
@@ -20,3 +29,4 @@ app.include_router(cases.router)
 app.include_router(documents.router)
 app.include_router(fhir.router)
 app.include_router(extractions.router)
+app.include_router(rag.router)
