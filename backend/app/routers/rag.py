@@ -23,7 +23,11 @@ from app.embedding_service import (
     EmbeddingProviderError,
 )
 from app.rag_schemas import DocumentIndexResponse
-
+from app.audit_models import AuditEventRecord
+from app.audit_schemas import (
+    AuditActorType,
+    AuditEventType,
+)
 
 router = APIRouter(
     prefix="/v1/cases",
@@ -68,6 +72,28 @@ def index_clinical_document(
             document=document,
             provider=provider,
         )
+
+        if not result.reused_existing:
+            audit_event = AuditEventRecord(
+                case_id=case_id,
+                event_type=(
+                    AuditEventType.document_indexed.value
+                ),
+                actor_type=AuditActorType.system.value,
+                details={
+                    "document_id": str(document.id),
+                    "chunk_count": len(result.chunks),
+                    "embedding_model": (
+                        result.embedding_model
+                    ),
+                    "document_sha256": (
+                        document.content_sha256
+                    ),
+                },
+            )
+
+            database.add(audit_event)
+
         database.commit()
     except DocumentIndexingError as error:
         database.rollback()

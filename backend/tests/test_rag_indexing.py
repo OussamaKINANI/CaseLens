@@ -82,6 +82,26 @@ def test_index_document_persists_traceable_chunks(
         assert len(chunk["content_sha256"]) == 64
         assert "embedding" not in chunk
 
+    audit_response = client.get(
+        f"/v1/cases/{case['id']}/audit"
+    )
+
+    assert audit_response.status_code == 200
+
+    document_indexed_events = [
+        event
+        for event in audit_response.json()
+        if event["event_type"] == "document_indexed"
+    ]
+
+    assert len(document_indexed_events) == 1
+    assert (
+        document_indexed_events[0]["details"][
+            "document_id"
+        ]
+        == document["id"]
+    )
+
 
 def test_repeated_indexing_reuses_existing_chunks(
     client: TestClient,
@@ -121,7 +141,17 @@ def test_repeated_indexing_reuses_existing_chunks(
     ]
 
     assert first_ids == second_ids
+    audit_response = client.get(
+        f"/v1/cases/{case['id']}/audit"
+    )
 
+    document_indexed_events = [
+        event
+        for event in audit_response.json()
+        if event["event_type"] == "document_indexed"
+    ]
+
+    assert len(document_indexed_events) == 1
 
 def test_document_cannot_be_indexed_through_wrong_case(
     client: TestClient,

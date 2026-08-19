@@ -31,6 +31,7 @@ class AuditEventRecord(Base):
                 'human_review_completed',
                 'processing_failed',
                 'document_uploaded'
+                'document_indexed'
             )
             """,
             name="ck_audit_events_event_type",

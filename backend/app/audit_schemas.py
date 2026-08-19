@@ -14,6 +14,7 @@ class AuditEventType(str, Enum):
     human_review_completed = "human_review_completed"
     processing_failed = "processing_failed"
     document_uploaded = "document_uploaded"
+    document_indexed = "document_indexed"
 
 
 class AuditActorType(str, Enum):
