@@ -1,0 +1,47 @@
+[
+  {
+    "name": "lumbar_pain_after_therapy",
+    "document_id": "00000000-0000-0000-0000-000000000001",
+    "content": "Lower back pain is present. Physical therapy was attempted but symptoms did not improve.",
+    "expected_facts": [
+      {
+        "fact_type": "symptom",
+        "name": "lower back pain",
+        "assertion": "present"
+      },
+      {
+        "fact_type": "procedure",
+        "name": "physical therapy",
+        "assertion": "historical"
+      },
+      {
+        "fact_type": "other",
+        "name": "symptoms did not improve after physical therapy",
+        "assertion": "historical"
+      }
+    ]
+  },
+  {
+    "name": "negated_fever_and_allergy",
+    "document_id": "00000000-0000-0000-0000-000000000002",
+    "content": "The patient denies fever. Penicillin allergy is documented.",
+    "expected_facts": [
+      {
+        "fact_type": "symptom",
+        "name": "fever",
+        "assertion": "absent"
+      },
+      {
+        "fact_type": "allergy",
+        "name": "penicillin",
+        "assertion": "present"
+      }
+    ]
+  },
+  {
+    "name": "administrative_note_without_facts",
+    "document_id": "00000000-0000-0000-0000-000000000003",
+    "content": "Administrative scheduling note only.",
+    "expected_facts": []
+  }
+]

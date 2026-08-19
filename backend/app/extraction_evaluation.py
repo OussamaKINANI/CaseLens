@@ -195,3 +195,9 @@ def evaluate_extraction(
         unsupported_fact_rate=unsupported_fact_rate,
         citation_validity=citation_validity,
     )
+
+class ExtractionEvaluationCase(StrictModel):
+    name: str = Field(min_length=1, max_length=200)
+    document_id: UUID
+    content: str = Field(min_length=1)
+    expected_facts: list[ExpectedClinicalFact]
