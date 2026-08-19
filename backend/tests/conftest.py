@@ -18,7 +18,16 @@ from app.extraction_models import ClinicalExtractionRecord
 from app.embedding_factory import get_embedding_provider
 from app.embedding_service import FakeEmbeddingProvider
 from app.rag_models import DocumentChunkRecord
-
+from app.answer_provider_factory import (
+    get_answer_provider,
+)
+from app.answer_service import FakeAnswerProvider
+from app.extraction_provider_factory import (
+    get_extraction_provider,
+)
+from app.extraction_service import (
+    FakeExtractionProvider,
+)
 
 test_engine = create_engine(
     settings.test_database_url,
@@ -55,6 +64,12 @@ def client() -> Generator[TestClient, None, None]:
         lambda: FakeEmbeddingProvider(
             dimensions=1536
         )
+    )
+    app.dependency_overrides[get_answer_provider] = (
+        lambda: FakeAnswerProvider()
+    )
+    app.dependency_overrides[get_extraction_provider] = (
+        lambda: FakeExtractionProvider()
     )
     try:
         with TestClient(app) as test_client:

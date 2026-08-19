@@ -15,6 +15,7 @@ class AuditEventType(str, Enum):
     processing_failed = "processing_failed"
     document_uploaded = "document_uploaded"
     document_indexed = "document_indexed"
+    rag_answer_generated = "rag_answer_generated"
 
 
 class AuditActorType(str, Enum):

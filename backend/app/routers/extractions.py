@@ -16,6 +16,7 @@ from app.extraction_provider_factory import (
 )
 from app.extraction_service import (
     EvidenceVerificationError,
+    ExtractionProvider,
     ExtractionProviderError,
     verify_extraction_evidence,
 )
@@ -27,7 +28,6 @@ router = APIRouter(
     tags=["extractions"],
 )
 
-extraction_provider = get_extraction_provider()
 
 @router.post(
     "/{case_id}/documents/{document_id}/extractions",
@@ -38,6 +38,9 @@ def create_clinical_extraction(
     case_id: UUID,
     document_id: UUID,
     database: Session = Depends(get_database_session),
+    extraction_provider: ExtractionProvider = Depends(
+        get_extraction_provider
+    ),
 ) -> ClinicalExtractionRecord:
     document = database.scalar(
         select(ClinicalDocumentRecord).where(

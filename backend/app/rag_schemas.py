@@ -8,6 +8,7 @@ from pydantic import (
     field_validator,
 )
 
+from app.answer_schemas import GroundedAnswer
 
 class DocumentChunkRead(BaseModel):
     model_config = ConfigDict(
@@ -96,3 +97,20 @@ class CaseSearchResponse(BaseModel):
     embedding_model: str
     result_count: int
     results: list[RetrievedChunkRead]
+
+class CaseAnswerRequest(CaseSearchRequest):
+    pass
+
+
+class CaseAnswerResponse(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    query: str
+    top_k: int
+    embedding_model: str
+    answer_provider: str
+    answer_model: str
+    retrieved_chunk_count: int
+    answer: GroundedAnswer

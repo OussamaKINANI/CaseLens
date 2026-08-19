@@ -27,6 +27,8 @@ from app.rag_schemas import (
     CaseSearchResponse,
     DocumentIndexResponse,
     RetrievedChunkRead,
+    CaseAnswerRequest,
+    CaseAnswerResponse,
 )
 from app.audit_models import AuditEventRecord
 from app.audit_schemas import (
@@ -38,6 +40,19 @@ from app.document_retrieval_service import (
     retrieve_case_chunks,
 )
 from app.models import CaseRecord
+from hashlib import sha256
+
+from app.answer_provider_factory import (
+    get_answer_provider,
+)
+from app.answer_service import (
+    AnswerEvidence,
+    AnswerEvidenceVerificationError,
+    AnswerProvider,
+    AnswerProviderError,
+    create_insufficient_evidence_answer,
+    verify_grounded_answer,
+)
 
 router = APIRouter(
     prefix="/v1/cases",
@@ -210,4 +225,143 @@ def search_case_documents(
         embedding_model=retrieval.embedding_model,
         result_count=len(results),
         results=results,
+    )
+
+@router.post(
+    "/{case_id}/answer",
+    response_model=CaseAnswerResponse,
+)
+def answer_case_question(
+    case_id: UUID,
+    payload: CaseAnswerRequest,
+    database: Annotated[
+        Session,
+        Depends(get_database_session),
+    ],
+    embedding_provider: Annotated[
+        EmbeddingProvider,
+        Depends(get_embedding_provider),
+    ],
+    answer_provider: Annotated[
+        AnswerProvider,
+        Depends(get_answer_provider),
+    ],
+) -> CaseAnswerResponse:
+    case = database.get(CaseRecord, case_id)
+
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+
+    try:
+        retrieval = retrieve_case_chunks(
+            database,
+            case_id=case_id,
+            query=payload.query,
+            provider=embedding_provider,
+            top_k=payload.top_k,
+        )
+
+        evidence = [
+            AnswerEvidence(
+                chunk_id=item.chunk.id,
+                document_id=item.chunk.document_id,
+                content=item.chunk.content,
+                start_char=item.chunk.start_char,
+                end_char=item.chunk.end_char,
+            )
+            for item in retrieval.results
+        ]
+
+        if evidence:
+            grounded_answer = answer_provider.answer(
+                payload.query,
+                evidence,
+            )
+        else:
+            grounded_answer = (
+                create_insufficient_evidence_answer()
+            )
+
+        verify_grounded_answer(
+            grounded_answer,
+            evidence,
+        )
+    except DocumentRetrievalError as error:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_422_UNPROCESSABLE_CONTENT
+            ),
+            detail=str(error),
+        ) from error
+    except (
+        EmbeddingProviderError,
+        AnswerProviderError,
+    ) as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI provider failed",
+        ) from error
+    except AnswerEvidenceVerificationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Generated answer failed evidence "
+                "verification"
+            ),
+        ) from error
+
+    retrieved_chunk_ids = [
+        str(item.chunk.id)
+        for item in retrieval.results
+    ]
+
+    audit_event = AuditEventRecord(
+        case_id=case_id,
+        event_type=(
+            AuditEventType.rag_answer_generated.value
+        ),
+        actor_type=AuditActorType.system.value,
+        details={
+            "query_sha256": sha256(
+                payload.query.encode("utf-8")
+            ).hexdigest(),
+            "top_k": payload.top_k,
+            "retrieved_chunk_count": len(evidence),
+            "retrieved_chunk_ids": retrieved_chunk_ids,
+            "embedding_model": retrieval.embedding_model,
+            "answer_provider": (
+                answer_provider.provider_name
+            ),
+            "answer_model": answer_provider.model_name,
+            "supported": grounded_answer.supported,
+            "citation_count": len(
+                grounded_answer.citations
+            ),
+        },
+    )
+
+    try:
+        database.add(audit_event)
+        database.commit()
+    except IntegrityError as error:
+        database.rollback()
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail="Unable to record answer audit event",
+        ) from error
+
+    return CaseAnswerResponse(
+        query=payload.query,
+        top_k=payload.top_k,
+        embedding_model=retrieval.embedding_model,
+        answer_provider=answer_provider.provider_name,
+        answer_model=answer_provider.model_name,
+        retrieved_chunk_count=len(evidence),
+        answer=grounded_answer,
     )
