@@ -30,7 +30,7 @@ class AuditEventRecord(Base):
                 'ai_review_completed',
                 'human_review_completed',
                 'processing_failed',
-                'document_uploaded'
+                'document_uploaded',
                 'document_indexed'
             )
             """,
