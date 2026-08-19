@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     ai_provider: Literal["fake", "openai"] = "fake"
     openai_api_key: str | None = None
     openai_model: str = "gpt-5-mini"
-    
+    openai_timeout_seconds: float = 120.0
+
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",

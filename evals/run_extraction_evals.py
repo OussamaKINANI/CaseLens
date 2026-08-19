@@ -48,6 +48,7 @@ def build_provider(
     return OpenAIExtractionProvider(
         api_key=settings.openai_api_key,
         model_name=settings.openai_model,
+        timeout_seconds=settings.openai_timeout_seconds,
     )
 
 
@@ -82,6 +83,12 @@ def main() -> None:
         default="fake",
     )
 
+    parser.add_argument(
+        "--show-outputs",
+        action="store_true",
+        help="Print each provider extraction as JSON",
+    )
+
     arguments = parser.parse_args()
 
     provider = build_provider(arguments.provider)
@@ -103,6 +110,19 @@ def main() -> None:
             document_id=case.document_id,
             content=case.content,
         )
+        extraction = provider.extract(
+            document_id=case.document_id,
+            content=case.content,
+        )
+
+        if arguments.show_outputs:
+            print()
+            print(f"Raw extraction for {case.name}")
+            print(
+                extraction.model_dump_json(
+                    indent=2,
+                )
+            )
 
         evaluation = evaluate_extraction(
             extraction=extraction,

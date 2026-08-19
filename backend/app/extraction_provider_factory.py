@@ -20,4 +20,5 @@ def get_extraction_provider() -> ExtractionProvider:
     return OpenAIExtractionProvider(
         api_key=settings.openai_api_key,
         model_name=settings.openai_model,
+        timeout_seconds=settings.openai_timeout_seconds,
     )
