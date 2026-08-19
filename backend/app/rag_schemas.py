@@ -1,7 +1,12 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 
 class DocumentChunkRead(BaseModel):
@@ -31,3 +36,63 @@ class DocumentIndexResponse(BaseModel):
     embedding_model: str
     reused_existing: bool
     chunks: list[DocumentChunkRead]
+
+
+class CaseSearchRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    query: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
+
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+    )
+
+    @field_validator("query")
+    @classmethod
+    def reject_blank_query(
+        cls,
+        value: str,
+    ) -> str:
+        normalized = value.strip()
+
+        if not normalized:
+            raise ValueError(
+                "Search query cannot be blank"
+            )
+
+        return normalized
+
+
+class RetrievedChunkRead(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    id: UUID
+    document_id: UUID
+    chunk_index: int
+    content: str
+    start_char: int
+    end_char: int
+    content_sha256: str
+    embedding_model: str
+    similarity: float
+
+
+class CaseSearchResponse(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    query: str
+    top_k: int
+    embedding_model: str
+    result_count: int
+    results: list[RetrievedChunkRead]
