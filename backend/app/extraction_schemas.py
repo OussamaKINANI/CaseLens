@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from datetime import datetime
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(
@@ -59,3 +61,20 @@ class ClinicalExtraction(StrictModel):
     facts: list[ClinicalFact] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+class ClinicalExtractionRead(StrictModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    id: UUID
+    case_id: UUID
+    document_id: UUID
+    provider_name: str
+    model_name: str
+    schema_version: str
+    source_sha256: str
+    result: ClinicalExtraction
+    created_at: datetime

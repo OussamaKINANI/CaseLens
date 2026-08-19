@@ -13,6 +13,7 @@ from app.models import CaseRecord
 from app.audit_models import AuditEventRecord
 
 from app.document_models import ClinicalDocumentRecord
+from app.extraction_models import ClinicalExtractionRecord
 
 
 test_engine = create_engine(
@@ -29,6 +30,7 @@ TestSessionLocal = sessionmaker(
 
 def clear_test_database() -> None:
     with TestSessionLocal() as session:
+        session.execute(delete(ClinicalExtractionRecord))
         session.execute(delete(AuditEventRecord))
         session.execute(delete(ClinicalDocumentRecord))
         session.execute(delete(CaseRecord))
