@@ -127,3 +127,6 @@ def verify_extraction_evidence(
                     "Evidence quote does not match source document: "
                     f"fact={fact_index}, citation={citation_index}"
                 )
+
+class ExtractionProviderError(RuntimeError):
+    pass

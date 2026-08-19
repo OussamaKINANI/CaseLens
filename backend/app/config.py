@@ -3,6 +3,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from typing import Literal
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -13,6 +15,10 @@ class Settings(BaseSettings):
     database_url: str
     test_database_url: str
 
+    ai_provider: Literal["fake", "openai"] = "fake"
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-5-mini"
+    
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",

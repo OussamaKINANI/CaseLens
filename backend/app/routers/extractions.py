@@ -11,9 +11,12 @@ from app.database import get_database_session
 from app.document_models import ClinicalDocumentRecord
 from app.extraction_models import ClinicalExtractionRecord
 from app.extraction_schemas import ClinicalExtractionRead
+from app.extraction_provider_factory import (
+    get_extraction_provider,
+)
 from app.extraction_service import (
     EvidenceVerificationError,
-    FakeExtractionProvider,
+    ExtractionProviderError,
     verify_extraction_evidence,
 )
 from app.models import CaseRecord
@@ -24,8 +27,7 @@ router = APIRouter(
     tags=["extractions"],
 )
 
-extraction_provider = FakeExtractionProvider()
-
+extraction_provider = get_extraction_provider()
 
 @router.post(
     "/{case_id}/documents/{document_id}/extractions",
@@ -67,18 +69,24 @@ def create_clinical_extraction(
             detail="Extraction already exists for this document",
         )
 
-    extraction = extraction_provider.extract(
-        document_id=document.id,
-        content=document.content,
-    )
-
     try:
+        extraction = extraction_provider.extract(
+            document_id=document.id,
+            content=document.content,
+        )
+
         verify_extraction_evidence(
             extraction=extraction,
             documents={
                 document.id: document.content,
             },
         )
+    except ExtractionProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Extraction provider failed",
+        ) from error
+    
     except EvidenceVerificationError as error:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
