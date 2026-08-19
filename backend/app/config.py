@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-5-mini"
     openai_timeout_seconds: float = 120.0
 
+    embedding_provider: Literal["fake", "openai"] = "fake"
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
