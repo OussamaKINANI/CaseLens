@@ -198,3 +198,53 @@ def test_search_rejects_unknown_case(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Case not found"
+
+def test_utf8_bom_is_not_indexed_as_clinical_content(
+    client: TestClient,
+) -> None:
+    case = create_case(
+        client,
+        "SYNTH-SEARCH-005",
+    )
+
+    upload_response = client.post(
+        f"/v1/cases/{case['id']}/documents",
+        files={
+            "file": (
+                "bom-note.txt",
+                (
+                    b"\xef\xbb\xbf"
+                    b"Synthetic fever evidence."
+                ),
+                "text/plain",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 201
+
+    document = upload_response.json()
+
+    index_document(
+        client,
+        case["id"],
+        document["id"],
+    )
+
+    search_response = client.post(
+        f"/v1/cases/{case['id']}/search",
+        json={
+            "query": "fever evidence",
+            "top_k": 1,
+        },
+    )
+
+    assert search_response.status_code == 200
+
+    result = search_response.json()["results"][0]
+
+    assert result["content"] == (
+        "Synthetic fever evidence."
+    )
+    assert not result["content"].startswith("\ufeff")
+    assert not result["content"].startswith("ï»¿")
