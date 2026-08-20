@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useState,
 } from "react";
 
@@ -48,6 +49,29 @@ export function CaseIntake({
     useState(false);
   const [error, setError] =
     useState<string | null>(null);
+
+  useEffect(() => {
+    const previousOverflow =
+      document.body.style.overflow;
+
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape" && !submitting) {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown,
+      );
+    };
+  }, [onClose, submitting]);
 
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>,
@@ -156,6 +180,8 @@ export function CaseIntake({
     >
       <section
         className="intake-modal"
+        role="dialog"
+        aria-modal="true"
         aria-labelledby="intake-title"
         onMouseDown={(event) => {
           event.stopPropagation();
@@ -204,7 +230,7 @@ export function CaseIntake({
         </div>
 
         {error && (
-          <div className="intake-error">
+          <div className="intake-error" role="alert">
             <strong>
               Unable to complete intake
             </strong>
@@ -337,6 +363,10 @@ export function CaseIntake({
             />
 
             <div className="file-dropzone">
+              <span className="file-dropzone-icon" aria-hidden="true">
+                TXT
+              </span>
+
               <strong>
                 {documentFile
                   ? documentFile.name
@@ -344,7 +374,9 @@ export function CaseIntake({
               </strong>
 
               <small>
-                Maximum size: 1 MB
+                {documentFile
+                  ? `${(documentFile.size / 1024).toFixed(1)} KB · ready to upload`
+                  : "Plain text · maximum size 1 MB"}
               </small>
             </div>
           </label>

@@ -149,6 +149,29 @@ export function CaseWorkspace({
   const [askingQuestion, setAskingQuestion] =
     useState(false);
 
+  useEffect(() => {
+    const previousOverflow =
+      document.body.style.overflow;
+
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown,
+      );
+    };
+  }, [onClose]);
+
   const applyWorkspaceData = useCallback(
     (data: WorkspaceData) => {
       setDocuments(data.documents);
@@ -463,7 +486,9 @@ export function CaseWorkspace({
     >
       <section
         className="review-workspace"
-        aria-label="Clinical case reviewer workspace"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workspace-title"
         onMouseDown={(event) => {
           event.stopPropagation();
         }}
@@ -484,7 +509,7 @@ export function CaseWorkspace({
                 Reviewer workspace
               </p>
 
-              <h2>
+              <h2 id="workspace-title">
                 {
                   clinicalCase.patient_external_id
                 }
@@ -553,6 +578,7 @@ export function CaseWorkspace({
         <nav
           className="workspace-tabs"
           aria-label="Case workspace sections"
+          role="tablist"
         >
           <button
             className={
@@ -561,9 +587,11 @@ export function CaseWorkspace({
                 : ""
             }
             type="button"
+            role="tab"
             onClick={() => {
               setActiveTab("findings");
             }}
+            aria-selected={activeTab === "findings"}
           >
             AI findings
             <span>{facts.length}</span>
@@ -576,9 +604,11 @@ export function CaseWorkspace({
                 : ""
             }
             type="button"
+            role="tab"
             onClick={() => {
               setActiveTab("documents");
             }}
+            aria-selected={activeTab === "documents"}
           >
             Documents
             <span>{documents.length}</span>
@@ -591,9 +621,11 @@ export function CaseWorkspace({
                 : ""
             }
             type="button"
+            role="tab"
             onClick={() => {
               setActiveTab("audit");
             }}
+            aria-selected={activeTab === "audit"}
           >
             Audit trail
             <span>{auditEvents.length}</span>
@@ -601,14 +633,17 @@ export function CaseWorkspace({
         </nav>
 
         {error && (
-          <div className="workspace-message error">
+          <div className="workspace-message error" role="alert">
             <strong>Action failed</strong>
             <p>{error}</p>
           </div>
         )}
 
         {notice && (
-          <div className="workspace-message success">
+          <div
+            className="workspace-message success"
+            role="status"
+          >
             <strong>Success</strong>
             <p>{notice}</p>
           </div>
@@ -804,7 +839,14 @@ export function CaseWorkspace({
                       </div>
 
                       <div className="question-form">
+                        <label
+                          className="sr-only"
+                          htmlFor="case-question"
+                        >
+                          Ask a question about this case
+                        </label>
                         <textarea
+                          id="case-question"
                           value={question}
                           onChange={(event) => {
                             setQuestion(
@@ -813,6 +855,15 @@ export function CaseWorkspace({
                           }}
                           rows={3}
                           maxLength={2000}
+                          onKeyDown={(event) => {
+                            if (
+                              (event.metaKey || event.ctrlKey) &&
+                              event.key === "Enter"
+                            ) {
+                              event.preventDefault();
+                              void askQuestion();
+                            }
+                          }}
                         />
 
                         <button
@@ -830,6 +881,7 @@ export function CaseWorkspace({
 
                       {answerResult && (
                         <article
+                          aria-live="polite"
                           className={
                             answerResult.answer
                               .supported
@@ -968,10 +1020,19 @@ export function CaseWorkspace({
                       </div>
                     </div>
 
-                    <div className="audit-timeline">
-                      {[...auditEvents]
-                        .reverse()
-                        .map((event) => (
+                    {auditEvents.length === 0 ? (
+                      <div className="workspace-empty">
+                        <strong>No audit events yet</strong>
+                        <p>
+                          Case and review actions will appear
+                          here as an immutable history.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="audit-timeline">
+                        {[...auditEvents]
+                          .reverse()
+                          .map((event) => (
                           <article
                             key={event.id}
                           >
@@ -1005,8 +1066,9 @@ export function CaseWorkspace({
                               </pre>
                             </div>
                           </article>
-                        ))}
-                    </div>
+                          ))}
+                      </div>
+                    )}
                   </section>
                 )}
               </>

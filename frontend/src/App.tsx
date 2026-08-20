@@ -26,6 +26,7 @@ import "./App.css";
 
 
 type StatusFilter = "all" | CaseStatus;
+type PriorityFilter = "all" | "routine" | "urgent";
 
 const STATUS_LABELS: Record<CaseStatus, string> = {
   received: "Received",
@@ -68,6 +69,8 @@ function App() {
   ] = useState(false);
   const [statusFilter, setStatusFilter] =
     useState<StatusFilter>("all");
+  const [priorityFilter, setPriorityFilter] =
+    useState<PriorityFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] =
@@ -157,6 +160,10 @@ function App() {
         statusFilter === "all" ||
         clinicalCase.status === statusFilter;
 
+      const matchesPriority =
+        priorityFilter === "all" ||
+        clinicalCase.priority === priorityFilter;
+
       const matchesSearch =
         !query ||
         clinicalCase.patient_external_id
@@ -169,13 +176,23 @@ function App() {
           .toLowerCase()
           .includes(query);
 
-      return matchesStatus && matchesSearch;
+      return (
+        matchesStatus &&
+        matchesPriority &&
+        matchesSearch
+      );
     });
   }, [
     cases,
+    priorityFilter,
     searchQuery,
     statusFilter,
   ]);
+
+  const hasActiveFilters =
+    statusFilter !== "all" ||
+    priorityFilter !== "all" ||
+    searchQuery.trim().length > 0;
 
   const metrics = useMemo(() => {
     return {
@@ -204,13 +221,15 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">
-            <span>CL</span>
-          </div>
+          <img
+            className="brand-mark"
+            src="/caselens-mark.svg"
+            alt=""
+          />
 
           <div>
             <strong>CaseLens</strong>
-            <small>Clinical review</small>
+            <small>Evidence review</small>
           </div>
         </div>
 
@@ -223,43 +242,78 @@ function App() {
           </p>
 
           <button
-            className="navigation-item active"
+            className={
+              statusFilter === "all" &&
+              priorityFilter === "all"
+                ? "navigation-item active"
+                : "navigation-item"
+            }
             type="button"
+            onClick={() => {
+              setStatusFilter("all");
+              setPriorityFilter("all");
+            }}
           >
-            <span className="navigation-index">
-              01
-            </span>
-            Case worklist
-          </button>
-
-          <button
-            className="navigation-item"
-            type="button"
-            disabled
-          >
-            <span className="navigation-index">
-              02
-            </span>
-            AI review
-            <span className="coming-soon">
-              Soon
+            <span className="navigation-icon">WL</span>
+            All cases
+            <span className="navigation-count">
+              {metrics.total}
             </span>
           </button>
 
           <button
-            className="navigation-item"
+            className={
+              statusFilter === "awaiting_review"
+                ? "navigation-item active"
+                : "navigation-item"
+            }
             type="button"
-            disabled
+            onClick={() => {
+              setStatusFilter("awaiting_review");
+              setPriorityFilter("all");
+            }}
           >
-            <span className="navigation-index">
-              03
+            <span className="navigation-icon">HR</span>
+            Needs review
+            <span className="navigation-count attention">
+              {metrics.awaiting}
             </span>
-            Audit trail
-            <span className="coming-soon">
-              Soon
+          </button>
+
+          <button
+            className={
+              priorityFilter === "urgent"
+                ? "navigation-item active"
+                : "navigation-item"
+            }
+            type="button"
+            onClick={() => {
+              setStatusFilter("all");
+              setPriorityFilter("urgent");
+            }}
+          >
+            <span className="navigation-icon">P1</span>
+            Urgent queue
+            <span className="navigation-count urgent">
+              {metrics.urgent}
             </span>
           </button>
         </nav>
+
+        <div className="guardrail-card">
+          <span className="guardrail-kicker">
+            Review guardrails
+          </span>
+          <strong>Evidence before inference.</strong>
+          <p>
+            Every AI claim remains source-linked and
+            every final decision stays human-owned.
+          </p>
+          <div className="guardrail-points">
+            <span>Exact citations</span>
+            <span>Immutable audit</span>
+          </div>
+        </div>
 
         <div className="sidebar-footer">
           <div className="environment-card">
@@ -293,15 +347,16 @@ function App() {
       <main className="main-content">
         <header className="topbar">
           <div>
-            <p className="eyebrow">
-              Review operations
-            </p>
+            <p className="eyebrow">Review operations</p>
 
-            <h1>Case worklist</h1>
+            <h1>
+              Evidence review,
+              <span> built for human judgment.</span>
+            </h1>
 
             <p className="page-description">
-              Prioritize, inspect, and advance
-              evidence-grounded clinical reviews.
+              Triage incoming cases, inspect source-linked
+              AI findings, and record a defensible decision.
             </p>
           </div>
 
@@ -353,7 +408,19 @@ function App() {
           className="metrics-grid"
           aria-label="Case metrics"
         >
-          <article className="metric-card">
+          <button
+            className={
+              statusFilter === "all" &&
+              priorityFilter === "all"
+                ? "metric-card active"
+                : "metric-card"
+            }
+            type="button"
+            onClick={() => {
+              setStatusFilter("all");
+              setPriorityFilter("all");
+            }}
+          >
             <div className="metric-heading">
               <span>Total cases</span>
               <span className="metric-code">
@@ -363,9 +430,21 @@ function App() {
 
             <strong>{metrics.total}</strong>
             <p>Cases currently in CaseLens</p>
-          </article>
+            <span className="metric-action">View all</span>
+          </button>
 
-          <article className="metric-card review">
+          <button
+            className={
+              statusFilter === "awaiting_review"
+                ? "metric-card review active"
+                : "metric-card review"
+            }
+            type="button"
+            onClick={() => {
+              setStatusFilter("awaiting_review");
+              setPriorityFilter("all");
+            }}
+          >
             <div className="metric-heading">
               <span>Awaiting review</span>
               <span className="metric-code">
@@ -375,9 +454,21 @@ function App() {
 
             <strong>{metrics.awaiting}</strong>
             <p>Ready for reviewer action</p>
-          </article>
+            <span className="metric-action">Open queue</span>
+          </button>
 
-          <article className="metric-card urgent">
+          <button
+            className={
+              priorityFilter === "urgent"
+                ? "metric-card urgent active"
+                : "metric-card urgent"
+            }
+            type="button"
+            onClick={() => {
+              setStatusFilter("all");
+              setPriorityFilter("urgent");
+            }}
+          >
             <div className="metric-heading">
               <span>Urgent queue</span>
               <span className="metric-code">
@@ -387,9 +478,21 @@ function App() {
 
             <strong>{metrics.urgent}</strong>
             <p>Open urgent-priority cases</p>
-          </article>
+            <span className="metric-action">Prioritize</span>
+          </button>
 
-          <article className="metric-card completed">
+          <button
+            className={
+              statusFilter === "completed"
+                ? "metric-card completed active"
+                : "metric-card completed"
+            }
+            type="button"
+            onClick={() => {
+              setStatusFilter("completed");
+              setPriorityFilter("all");
+            }}
+          >
             <div className="metric-heading">
               <span>Completed</span>
               <span className="metric-code">
@@ -399,7 +502,8 @@ function App() {
 
             <strong>{metrics.completed}</strong>
             <p>Reviews completed to date</p>
-          </article>
+            <span className="metric-action">Review history</span>
+          </button>
         </section>
 
         <section className="worklist-card">
@@ -461,6 +565,40 @@ function App() {
                   </option>
                 </select>
               </label>
+
+              <label className="filter-control">
+                <span>Priority</span>
+
+                <select
+                  value={priorityFilter}
+                  onChange={(event) => {
+                    setPriorityFilter(
+                      event.target
+                        .value as PriorityFilter,
+                    );
+                  }}
+                >
+                  <option value="all">
+                    All priorities
+                  </option>
+                  <option value="urgent">Urgent</option>
+                  <option value="routine">Routine</option>
+                </select>
+              </label>
+
+              {hasActiveFilters && (
+                <button
+                  className="clear-filters"
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setStatusFilter("all");
+                    setPriorityFilter("all");
+                  }}
+                >
+                  Clear
+                </button>
+              )}
             </div>
           </div>
 
@@ -518,10 +656,22 @@ function App() {
                         (clinicalCase) => (
                           <tr
                             key={clinicalCase.id}
+                            tabIndex={0}
                             onClick={() => {
                               setSelectedCase(
                                 clinicalCase,
                               );
+                            }}
+                            onKeyDown={(event) => {
+                              if (
+                                event.key === "Enter" ||
+                                event.key === " "
+                              ) {
+                                event.preventDefault();
+                                setSelectedCase(
+                                  clinicalCase,
+                                );
+                              }
                             }}
                           >
                             <td>
@@ -596,7 +746,10 @@ function App() {
                                   );
                                 }}
                               >
-                                View
+                                Open
+                                <span aria-hidden="true">
+                                  {"\u2192"}
+                                </span>
                               </button>
                             </td>
                           </tr>
@@ -608,14 +761,27 @@ function App() {
               {!loading &&
                 filteredCases.length === 0 && (
                   <div className="empty-state">
-                    <span>0</span>
+                    <span aria-hidden="true">0</span>
                     <strong>
-                      No matching cases
+                      {cases.length === 0
+                        ? "Your worklist is clear"
+                        : "No matching cases"}
                     </strong>
                     <p>
-                      Try changing the search or
-                      status filter.
+                      {cases.length === 0
+                        ? "Create a synthetic case to begin an evidence-grounded review."
+                        : "Try changing the search, status, or priority filter."}
                     </p>
+                    {cases.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCaseIntake(true);
+                        }}
+                      >
+                        Create first case
+                      </button>
+                    )}
                   </div>
                 )}
             </div>
