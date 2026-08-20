@@ -110,10 +110,6 @@ def main() -> None:
             document_id=case.document_id,
             content=case.content,
         )
-        extraction = provider.extract(
-            document_id=case.document_id,
-            content=case.content,
-        )
 
         if arguments.show_outputs:
             print()

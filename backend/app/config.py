@@ -4,6 +4,8 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from typing import Literal
+from pydantic import Field
+
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +26,12 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
+    rag_min_similarity: float = Field(
+        default=0.50,
+        ge=-1.0,
+        le=1.0,
+    )
+
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
@@ -37,3 +45,5 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+def get_rag_min_similarity() -> float:
+    return settings.rag_min_similarity

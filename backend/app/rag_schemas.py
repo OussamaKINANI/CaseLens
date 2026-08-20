@@ -10,6 +10,7 @@ from pydantic import (
 
 from app.answer_schemas import GroundedAnswer
 
+
 class DocumentChunkRead(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -94,9 +95,11 @@ class CaseSearchResponse(BaseModel):
 
     query: str
     top_k: int
+    min_similarity: float
     embedding_model: str
     result_count: int
     results: list[RetrievedChunkRead]
+
 
 class CaseAnswerRequest(CaseSearchRequest):
     pass
@@ -109,6 +112,7 @@ class CaseAnswerResponse(BaseModel):
 
     query: str
     top_k: int
+    min_similarity: float
     embedding_model: str
     answer_provider: str
     answer_model: str

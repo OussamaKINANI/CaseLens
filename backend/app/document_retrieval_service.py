@@ -11,7 +11,7 @@ from app.rag_models import DocumentChunkRecord
 
 
 class DocumentRetrievalError(RuntimeError):
-    """Raised when document retrieval cannot be completed safely."""
+    """Raised when retrieval cannot be completed safely."""
 
 
 @dataclass(slots=True)
@@ -33,6 +33,7 @@ def retrieve_case_chunks(
     query: str,
     provider: EmbeddingProvider,
     top_k: int = 5,
+    min_similarity: float = 0.0,
 ) -> DocumentRetrievalResult:
     normalized_query = query.strip()
 
@@ -44,6 +45,11 @@ def retrieve_case_chunks(
     if not 1 <= top_k <= 20:
         raise DocumentRetrievalError(
             "top_k must be between 1 and 20"
+        )
+
+    if not -1.0 <= min_similarity <= 1.0:
+        raise DocumentRetrievalError(
+            "min_similarity must be between -1 and 1"
         )
 
     embedding_model = (
@@ -123,6 +129,8 @@ def retrieve_case_chunks(
             ClinicalDocumentRecord.case_id == case_id,
             DocumentChunkRecord.embedding_model
             == embedding_model,
+            cosine_distance
+            <= 1.0 - min_similarity,
         )
         .order_by(
             cosine_distance.asc(),

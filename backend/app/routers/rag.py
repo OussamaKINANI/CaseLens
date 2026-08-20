@@ -1,3 +1,4 @@
+from hashlib import sha256
 from typing import Annotated
 from uuid import UUID
 
@@ -11,37 +12,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.database import get_database_session
-from app.document_indexing_service import (
-    DocumentIndexingError,
-    index_document,
-)
-from app.document_models import ClinicalDocumentRecord
-from app.embedding_factory import get_embedding_provider
-from app.embedding_service import (
-    EmbeddingProvider,
-    EmbeddingProviderError,
-)
-from app.rag_schemas import (
-    CaseSearchRequest,
-    CaseSearchResponse,
-    DocumentIndexResponse,
-    RetrievedChunkRead,
-    CaseAnswerRequest,
-    CaseAnswerResponse,
-)
-from app.audit_models import AuditEventRecord
-from app.audit_schemas import (
-    AuditActorType,
-    AuditEventType,
-)
-from app.document_retrieval_service import (
-    DocumentRetrievalError,
-    retrieve_case_chunks,
-)
-from app.models import CaseRecord
-from hashlib import sha256
-
 from app.answer_provider_factory import (
     get_answer_provider,
 )
@@ -53,6 +23,37 @@ from app.answer_service import (
     create_insufficient_evidence_answer,
     verify_grounded_answer,
 )
+from app.audit_models import AuditEventRecord
+from app.audit_schemas import (
+    AuditActorType,
+    AuditEventType,
+)
+from app.config import get_rag_min_similarity
+from app.database import get_database_session
+from app.document_indexing_service import (
+    DocumentIndexingError,
+    index_document,
+)
+from app.document_models import ClinicalDocumentRecord
+from app.document_retrieval_service import (
+    DocumentRetrievalError,
+    retrieve_case_chunks,
+)
+from app.embedding_factory import get_embedding_provider
+from app.embedding_service import (
+    EmbeddingProvider,
+    EmbeddingProviderError,
+)
+from app.models import CaseRecord
+from app.rag_schemas import (
+    CaseAnswerRequest,
+    CaseAnswerResponse,
+    CaseSearchRequest,
+    CaseSearchResponse,
+    DocumentIndexResponse,
+    RetrievedChunkRead,
+)
+
 
 router = APIRouter(
     prefix="/v1/cases",
@@ -155,6 +156,7 @@ def index_clinical_document(
         chunks=result.chunks,
     )
 
+
 @router.post(
     "/{case_id}/search",
     response_model=CaseSearchResponse,
@@ -169,6 +171,10 @@ def search_case_documents(
     provider: Annotated[
         EmbeddingProvider,
         Depends(get_embedding_provider),
+    ],
+    min_similarity: Annotated[
+        float,
+        Depends(get_rag_min_similarity),
     ],
 ) -> CaseSearchResponse:
     case = database.get(CaseRecord, case_id)
@@ -186,6 +192,7 @@ def search_case_documents(
             query=payload.query,
             provider=provider,
             top_k=payload.top_k,
+            min_similarity=min_similarity,
         )
     except DocumentRetrievalError as error:
         raise HTTPException(
@@ -222,10 +229,12 @@ def search_case_documents(
     return CaseSearchResponse(
         query=payload.query,
         top_k=payload.top_k,
+        min_similarity=min_similarity,
         embedding_model=retrieval.embedding_model,
         result_count=len(results),
         results=results,
     )
+
 
 @router.post(
     "/{case_id}/answer",
@@ -246,6 +255,10 @@ def answer_case_question(
         AnswerProvider,
         Depends(get_answer_provider),
     ],
+    min_similarity: Annotated[
+        float,
+        Depends(get_rag_min_similarity),
+    ],
 ) -> CaseAnswerResponse:
     case = database.get(CaseRecord, case_id)
 
@@ -262,6 +275,7 @@ def answer_case_question(
             query=payload.query,
             provider=embedding_provider,
             top_k=payload.top_k,
+            min_similarity=min_similarity,
         )
 
         evidence = [
@@ -329,6 +343,7 @@ def answer_case_question(
                 payload.query.encode("utf-8")
             ).hexdigest(),
             "top_k": payload.top_k,
+            "min_similarity": min_similarity,
             "retrieved_chunk_count": len(evidence),
             "retrieved_chunk_ids": retrieved_chunk_ids,
             "embedding_model": retrieval.embedding_model,
@@ -359,6 +374,7 @@ def answer_case_question(
     return CaseAnswerResponse(
         query=payload.query,
         top_k=payload.top_k,
+        min_similarity=min_similarity,
         embedding_model=retrieval.embedding_model,
         answer_provider=answer_provider.provider_name,
         answer_model=answer_provider.model_name,

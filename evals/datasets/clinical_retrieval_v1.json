@@ -1,0 +1,119 @@
+{
+  "name": "clinical_retrieval_v1",
+  "documents": [
+    {
+      "id": "00000000-0000-0000-0000-000000000101",
+      "content": "The patient reports six weeks of lower back pain. Physical therapy was attempted for four weeks without improvement. A lumbar spine MRI was requested for further evaluation."
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000102",
+      "content": "A penicillin allergy is documented. The patient reports a prior rash after penicillin exposure."
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000103",
+      "content": "The patient denies fever, chills, and night sweats."
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000104",
+      "content": "Type 2 diabetes mellitus is present. Metformin 500 mg twice daily is listed as a current medication."
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000105",
+      "content": "Right knee pain began after a fall. Knee radiographs showed no acute fracture."
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000106",
+      "content": "Administrative scheduling note only. The appointment was moved to Monday."
+    }
+  ],
+  "queries": [
+    {
+      "name": "back_pain_treatment",
+      "question": "What conservative treatment failed to improve the back symptoms?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000101"
+      ]
+    },
+    {
+      "name": "spine_imaging",
+      "question": "Which imaging study was requested for the spine?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000101"
+      ]
+    },
+    {
+      "name": "antibiotic_allergy",
+      "question": "Does the patient have an antibiotic allergy?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000102"
+      ]
+    },
+    {
+      "name": "penicillin_reaction",
+      "question": "What reaction occurred after penicillin exposure?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000102"
+      ]
+    },
+    {
+      "name": "fever_status",
+      "question": "Are fever or chills present?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000103"
+      ]
+    },
+    {
+      "name": "diabetes_medication",
+      "question": "Which medication is being used for diabetes?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000104"
+      ]
+    },
+    {
+      "name": "knee_injury",
+      "question": "What caused the patient's knee symptoms?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000105"
+      ]
+    },
+    {
+      "name": "knee_imaging",
+      "question": "Did the knee imaging show a fracture?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000105"
+      ]
+    },
+    {
+      "name": "appointment_schedule",
+      "question": "When was the appointment rescheduled?",
+      "relevant_document_ids": [
+        "00000000-0000-0000-0000-000000000106"
+      ]
+    },
+    {
+      "name": "unknown_kidney_medication",
+      "question": "What kidney medication was prescribed?",
+      "relevant_document_ids": []
+    },
+    {
+      "name": "unknown_smoking_history",
+      "question": "What is the patient's smoking history?",
+      "relevant_document_ids": []
+    },
+    {
+      "name": "unknown_blood_pressure",
+      "question": "What was the patient's blood pressure?",
+      "relevant_document_ids": []
+    },
+    {
+      "name": "unknown_surgery_date",
+      "question": "When did the patient undergo surgery?",
+      "relevant_document_ids": []
+    },
+    {
+      "name": "unknown_family_history",
+      "question": "Is there a family history of cancer?",
+      "relevant_document_ids": []
+    }
+  ]
+}
