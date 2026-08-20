@@ -15,6 +15,7 @@ from app.audit_schemas import (
 )
 from app.database import SessionLocal
 from app.document_models import ClinicalDocumentRecord
+from app.models import CaseRecord
 from app.review_models import CaseReviewRunRecord
 from app.review_schemas import ReviewRunStatus
 from app.review_workflow import (
@@ -24,6 +25,7 @@ from app.review_workflow import (
     START_REVIEW_ACTIVITY,
     VALIDATE_DOCUMENTS_ACTIVITY,
 )
+from app.schemas import CaseStatus
 from app.temporal_models import (
     CaseReviewWorkflowInput,
     CaseReviewWorkflowResult,
@@ -31,7 +33,7 @@ from app.temporal_models import (
     FinalizeReviewActivityInput,
     ReviewRunActivityInput,
 )
-from app.models import CaseRecord  # noqa: F401
+
 
 SessionFactory = Callable[[], Session]
 
@@ -73,7 +75,26 @@ class CaseReviewActivities:
 
         return review_run
 
-    def _add_status_audit_event(
+    def _get_parent_case(
+        self,
+        database: Session,
+        review_run: CaseReviewRunRecord,
+    ) -> CaseRecord:
+        case = database.get(
+            CaseRecord,
+            review_run.case_id,
+        )
+
+        if case is None:
+            raise ApplicationError(
+                "Parent case was not found",
+                type="ReviewCaseNotFound",
+                non_retryable=True,
+            )
+
+        return case
+
+    def _add_review_run_status_audit_event(
         self,
         database: Session,
         *,
@@ -92,6 +113,43 @@ class CaseReviewActivities:
                 ),
                 details={
                     "entity_type": "case_review_run",
+                    "review_run_id": str(
+                        review_run.id
+                    ),
+                    "previous_status": (
+                        previous_status
+                    ),
+                    "new_status": new_status,
+                },
+            )
+        )
+
+    def _set_parent_case_status(
+        self,
+        database: Session,
+        *,
+        case: CaseRecord,
+        review_run: CaseReviewRunRecord,
+        new_status: str,
+        actor_type: AuditActorType,
+    ) -> None:
+        previous_status = case.status
+
+        if previous_status == new_status:
+            return
+
+        case.status = new_status
+
+        database.add(
+            AuditEventRecord(
+                case_id=case.id,
+                event_type=(
+                    AuditEventType.status_changed.value
+                ),
+                actor_type=actor_type.value,
+                details={
+                    "entity_type": "case",
+                    "source": "case_review_workflow",
                     "review_run_id": str(
                         review_run.id
                     ),
@@ -132,6 +190,11 @@ class CaseReviewActivities:
                     non_retryable=True,
                 )
 
+            case = self._get_parent_case(
+                database,
+                review_run,
+            )
+
             review_run.status = (
                 ReviewRunStatus.running.value
             )
@@ -141,11 +204,19 @@ class CaseReviewActivities:
                     timezone.utc
                 )
 
-            self._add_status_audit_event(
+            self._add_review_run_status_audit_event(
                 database,
                 review_run=review_run,
                 previous_status=current_status,
                 new_status=review_run.status,
+            )
+
+            self._set_parent_case_status(
+                database,
+                case=case,
+                review_run=review_run,
+                new_status=CaseStatus.processing.value,
+                actor_type=AuditActorType.system,
             )
 
             database.commit()
@@ -258,17 +329,32 @@ class CaseReviewActivities:
                     non_retryable=True,
                 )
 
+            case = self._get_parent_case(
+                database,
+                review_run,
+            )
+
             review_run.status = (
                 ReviewRunStatus
                 .awaiting_human_review
                 .value
             )
 
-            self._add_status_audit_event(
+            self._add_review_run_status_audit_event(
                 database,
                 review_run=review_run,
                 previous_status=current_status,
                 new_status=review_run.status,
+            )
+
+            self._set_parent_case_status(
+                database,
+                case=case,
+                review_run=review_run,
+                new_status=(
+                    CaseStatus.awaiting_review.value
+                ),
+                actor_type=AuditActorType.system,
             )
 
             database.commit()
@@ -331,6 +417,11 @@ class CaseReviewActivities:
                     non_retryable=True,
                 )
 
+            case = self._get_parent_case(
+                database,
+                review_run,
+            )
+
             previous_status = review_run.status
             review_run.status = target_status
             review_run.completed_at = datetime.now(
@@ -374,6 +465,14 @@ class CaseReviewActivities:
                 )
             )
 
+            self._set_parent_case_status(
+                database,
+                case=case,
+                review_run=review_run,
+                new_status=CaseStatus.completed.value,
+                actor_type=AuditActorType.reviewer,
+            )
+
             database.commit()
 
             return CaseReviewWorkflowResult(
@@ -408,6 +507,11 @@ class CaseReviewActivities:
                 ReviewRunStatus.failed.value,
             }:
                 return review_run.status
+
+            case = self._get_parent_case(
+                database,
+                review_run,
+            )
 
             previous_status = review_run.status
             review_run.status = (
@@ -446,6 +550,14 @@ class CaseReviewActivities:
                         ),
                     },
                 )
+            )
+
+            self._set_parent_case_status(
+                database,
+                case=case,
+                review_run=review_run,
+                new_status=CaseStatus.failed.value,
+                actor_type=AuditActorType.system,
             )
 
             database.commit()

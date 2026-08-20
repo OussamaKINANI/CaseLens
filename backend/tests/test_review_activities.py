@@ -7,8 +7,8 @@ from temporalio.exceptions import ApplicationError
 from app.review_activities import CaseReviewActivities
 from app.temporal_models import (
     CaseReviewWorkflowInput,
+    FailReviewActivityInput,
     FinalizeReviewActivityInput,
-    HumanReviewUpdate,
     ReviewRunActivityInput,
 )
 from tests.conftest import TestSessionLocal
@@ -55,6 +55,18 @@ def build_activities() -> CaseReviewActivities:
     )
 
 
+def get_case(
+    client: TestClient,
+    case_id: str,
+) -> dict:
+    response = client.get(
+        f"/v1/cases/{case_id}"
+    )
+
+    assert response.status_code == 200
+    return response.json()
+
+
 def test_review_activities_complete_approved_run(
     client: TestClient,
 ) -> None:
@@ -71,6 +83,10 @@ def test_review_activities_complete_approved_run(
     )
 
     assert start_result == "running"
+    assert get_case(
+        client,
+        case["id"],
+    )["status"] == "processing"
 
     validation_result = (
         activities.validate_case_review_documents(
@@ -97,6 +113,11 @@ def test_review_activities_complete_approved_run(
         == "awaiting_human_review"
     )
 
+    assert get_case(
+        client,
+        case["id"],
+    )["status"] == "awaiting_review"
+
     final_result = activities.finalize_case_review(
         FinalizeReviewActivityInput(
             review_run_id=review_run["id"],
@@ -105,6 +126,11 @@ def test_review_activities_complete_approved_run(
     )
 
     assert final_result.status == "completed"
+
+    assert get_case(
+        client,
+        case["id"],
+    )["status"] == "completed"
 
     response = client.get(
         f"/v1/cases/{case['id']}/review-runs/"
@@ -115,6 +141,32 @@ def test_review_activities_complete_approved_run(
     assert response.json()["status"] == "completed"
     assert response.json()["started_at"] is not None
     assert response.json()["completed_at"] is not None
+
+    audit_response = client.get(
+        f"/v1/cases/{case['id']}/audit"
+    )
+
+    case_statuses = [
+        event["details"]["new_status"]
+        for event in audit_response.json()
+        if (
+            event["event_type"] == "status_changed"
+            and event["details"].get(
+                "entity_type"
+            )
+            == "case"
+            and event["details"].get(
+                "review_run_id"
+            )
+            == review_run["id"]
+        )
+    ]
+
+    assert case_statuses == [
+        "processing",
+        "awaiting_review",
+        "completed",
+    ]
 
 
 def test_start_activity_is_idempotent(
@@ -141,7 +193,7 @@ def test_start_activity_is_idempotent(
         f"/v1/cases/{case['id']}/audit"
     )
 
-    review_status_events = [
+    status_events = [
         event
         for event in audit_response.json()
         if (
@@ -153,7 +205,33 @@ def test_start_activity_is_idempotent(
         )
     ]
 
-    assert len(review_status_events) == 1
+    review_run_status_events = [
+        event
+        for event in status_events
+        if event["details"].get(
+            "entity_type"
+        )
+        == "case_review_run"
+    ]
+
+    case_status_events = [
+        event
+        for event in status_events
+        if event["details"].get(
+            "entity_type"
+        )
+        == "case"
+    ]
+
+    assert len(review_run_status_events) == 1
+    assert len(case_status_events) == 1
+
+    assert (
+        case_status_events[0]["details"][
+            "new_status"
+        ]
+        == "processing"
+    )
 
 
 def test_workflow_scope_mismatch_is_rejected(
@@ -207,13 +285,26 @@ def test_rejection_notes_are_hashed_in_audit(
         )
     )
 
-    activities.finalize_case_review(
-        FinalizeReviewActivityInput(
-            review_run_id=review_run["id"],
-            decision="reject",
-            notes="Synthetic rejection reason",
+    final_result = (
+        activities.finalize_case_review(
+            FinalizeReviewActivityInput(
+                review_run_id=review_run["id"],
+                decision="reject",
+                notes=(
+                    "Synthetic rejection reason"
+                ),
+            )
         )
     )
+
+    assert final_result.status == "rejected"
+
+    # The review decision is rejected, but the
+    # parent case lifecycle has finished.
+    assert get_case(
+        client,
+        case["id"],
+    )["status"] == "completed"
 
     audit_response = client.get(
         f"/v1/cases/{case['id']}/audit"
@@ -237,4 +328,46 @@ def test_rejection_notes_are_hashed_in_audit(
     assert (
         "Synthetic rejection reason"
         not in str(human_review_event)
+    )
+
+
+def test_failed_review_marks_parent_case_failed(
+    client: TestClient,
+) -> None:
+    case, _, review_run = create_review_run(
+        client
+    )
+
+    activities = build_activities()
+
+    activities.start_case_review(
+        ReviewRunActivityInput(
+            review_run_id=review_run["id"],
+        )
+    )
+
+    failure_result = activities.fail_case_review(
+        FailReviewActivityInput(
+            review_run_id=review_run["id"],
+            failure_code="SYNTHETIC_TEST_FAILURE",
+        )
+    )
+
+    assert failure_result == "failed"
+
+    assert get_case(
+        client,
+        case["id"],
+    )["status"] == "failed"
+
+    review_response = client.get(
+        f"/v1/cases/{case['id']}/review-runs/"
+        f"{review_run['id']}"
+    )
+
+    assert review_response.status_code == 200
+    assert review_response.json()["status"] == "failed"
+    assert (
+        review_response.json()["failure_code"]
+        == "SYNTHETIC_TEST_FAILURE"
     )
