@@ -31,7 +31,20 @@ class Settings(BaseSettings):
         ge=-1.0,
         le=1.0,
     )
+    temporal_address: str = Field(
+        default="localhost:7233",
+        min_length=1,
+    )
 
+    temporal_namespace: str = Field(
+        default="default",
+        min_length=1,
+    )
+
+    temporal_task_queue: str = Field(
+        default="caselens-review",
+        min_length=1,
+    )
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",

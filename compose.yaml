@@ -25,6 +25,27 @@ services:
       timeout: 5s
       retries: 5
 
+  temporal:
+    image: temporalio/temporal:1.8.2
+    container_name: caselens-temporal
+    restart: unless-stopped
+
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --db-filename
+      - /home/temporal/temporal.db
+
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+
+    volumes:
+      - temporal_data:/home/temporal
+
 
 volumes:
   postgres_data:
+  temporal_data:

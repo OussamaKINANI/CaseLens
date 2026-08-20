@@ -17,7 +17,18 @@ from app.review_models import CaseReviewRunRecord
 from app.review_schemas import (
     CaseReviewRunCreate,
     CaseReviewRunRead,
+    HumanReviewRequest,
     ReviewRunStatus,
+    ReviewWorkflowCommandResponse,
+)
+from app.review_workflow_gateway import (
+    ReviewWorkflowGateway,
+    ReviewWorkflowGatewayError,
+    get_review_workflow_gateway,
+)
+from app.temporal_models import (
+    CaseReviewWorkflowInput,
+    HumanReviewUpdate,
 )
 
 
@@ -25,6 +36,30 @@ router = APIRouter(
     prefix="/v1/cases",
     tags=["review workflows"],
 )
+
+
+def get_scoped_review_run(
+    database: Session,
+    *,
+    case_id: UUID,
+    review_run_id: UUID,
+) -> CaseReviewRunRecord:
+    statement = select(
+        CaseReviewRunRecord
+    ).where(
+        CaseReviewRunRecord.id == review_run_id,
+        CaseReviewRunRecord.case_id == case_id,
+    )
+
+    review_run = database.scalar(statement)
+
+    if review_run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Review run not found for this case",
+        )
+
+    return review_run
 
 
 @router.post(
@@ -93,8 +128,136 @@ def create_case_review_run(
         ) from error
 
     database.refresh(review_run)
-
     return review_run
+
+
+@router.post(
+    "/{case_id}/review-runs/{review_run_id}/start",
+    response_model=ReviewWorkflowCommandResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_case_review_run(
+    case_id: UUID,
+    review_run_id: UUID,
+    database: Session = Depends(get_database_session),
+    gateway: ReviewWorkflowGateway = Depends(
+        get_review_workflow_gateway
+    ),
+) -> ReviewWorkflowCommandResponse:
+    review_run = get_scoped_review_run(
+        database,
+        case_id=case_id,
+        review_run_id=review_run_id,
+    )
+
+    if review_run.status in {
+        ReviewRunStatus.completed.value,
+        ReviewRunStatus.rejected.value,
+        ReviewRunStatus.failed.value,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Review run is already terminal",
+        )
+
+    workflow_input = CaseReviewWorkflowInput(
+        review_run_id=str(review_run.id),
+        case_id=str(review_run.case_id),
+        document_ids=[
+            str(document_id)
+            for document_id
+            in review_run.document_ids
+        ],
+    )
+
+    try:
+        command_status = gateway.start_review(
+            workflow_id=(
+                review_run.temporal_workflow_id
+            ),
+            workflow_input=workflow_input,
+        )
+    except ReviewWorkflowGatewayError as error:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail="Temporal service is unavailable",
+        ) from error
+
+    return ReviewWorkflowCommandResponse(
+        review_run_id=review_run.id,
+        temporal_workflow_id=(
+            review_run.temporal_workflow_id
+        ),
+        command_status=command_status,
+    )
+
+
+@router.post(
+    (
+        "/{case_id}/review-runs/{review_run_id}"
+        "/human-review"
+    ),
+    response_model=ReviewWorkflowCommandResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def submit_case_human_review(
+    case_id: UUID,
+    review_run_id: UUID,
+    payload: HumanReviewRequest,
+    database: Session = Depends(get_database_session),
+    gateway: ReviewWorkflowGateway = Depends(
+        get_review_workflow_gateway
+    ),
+) -> ReviewWorkflowCommandResponse:
+    review_run = get_scoped_review_run(
+        database,
+        case_id=case_id,
+        review_run_id=review_run_id,
+    )
+
+    if (
+        review_run.status
+        != ReviewRunStatus
+        .awaiting_human_review
+        .value
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Review run is not awaiting "
+                "human review"
+            ),
+        )
+
+    try:
+        command_status = (
+            gateway.submit_human_review(
+                workflow_id=(
+                    review_run.temporal_workflow_id
+                ),
+                review=HumanReviewUpdate(
+                    decision=payload.decision.value,
+                    notes=payload.notes,
+                ),
+            )
+        )
+    except ReviewWorkflowGatewayError as error:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail="Temporal service is unavailable",
+        ) from error
+
+    return ReviewWorkflowCommandResponse(
+        review_run_id=review_run.id,
+        temporal_workflow_id=(
+            review_run.temporal_workflow_id
+        ),
+        command_status=command_status,
+    )
 
 
 @router.get(
@@ -138,19 +301,8 @@ def get_case_review_run(
     review_run_id: UUID,
     database: Session = Depends(get_database_session),
 ) -> CaseReviewRunRecord:
-    statement = select(
-        CaseReviewRunRecord
-    ).where(
-        CaseReviewRunRecord.id == review_run_id,
-        CaseReviewRunRecord.case_id == case_id,
+    return get_scoped_review_run(
+        database,
+        case_id=case_id,
+        review_run_id=review_run_id,
     )
-
-    review_run = database.scalar(statement)
-
-    if review_run is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Review run not found for this case",
-        )
-
-    return review_run

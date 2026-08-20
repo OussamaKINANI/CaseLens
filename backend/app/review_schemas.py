@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -90,3 +90,13 @@ class CaseReviewRunRead(StrictModel):
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+
+class ReviewWorkflowCommandResponse(StrictModel):
+    review_run_id: UUID
+    temporal_workflow_id: str
+
+    command_status: Literal[
+        "started",
+        "already_started",
+        "accepted",
+    ]
