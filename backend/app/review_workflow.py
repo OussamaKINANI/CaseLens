@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
@@ -9,28 +10,56 @@ from app.temporal_models import (
     FailReviewActivityInput,
     FinalizeReviewActivityInput,
     HumanReviewUpdate,
+    ReviewDocumentActivityInput,
+    ReviewDocumentExtractionResult,
+    ReviewDocumentIndexResult,
     ReviewRunActivityInput,
 )
 
 
 START_REVIEW_ACTIVITY = "start_case_review"
+
 VALIDATE_DOCUMENTS_ACTIVITY = (
     "validate_case_review_documents"
 )
+
+INDEX_DOCUMENT_ACTIVITY = (
+    "index_case_review_document"
+)
+
+EXTRACT_DOCUMENT_ACTIVITY = (
+    "extract_case_review_document"
+)
+
 AWAIT_HUMAN_REVIEW_ACTIVITY = (
     "mark_case_review_awaiting_human"
 )
+
 FINALIZE_REVIEW_ACTIVITY = "finalize_case_review"
 FAIL_REVIEW_ACTIVITY = "fail_case_review"
 
 
-ACTIVITY_TIMEOUT = timedelta(seconds=30)
+CONTROL_ACTIVITY_TIMEOUT = timedelta(
+    seconds=30
+)
 
-ACTIVITY_RETRY_POLICY = RetryPolicy(
+AI_ACTIVITY_TIMEOUT = timedelta(
+    seconds=180
+)
+
+
+CONTROL_RETRY_POLICY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     backoff_coefficient=2.0,
     maximum_interval=timedelta(seconds=10),
     maximum_attempts=5,
+)
+
+AI_RETRY_POLICY = RetryPolicy(
+    initial_interval=timedelta(seconds=2),
+    backoff_coefficient=2.0,
+    maximum_interval=timedelta(seconds=15),
+    maximum_attempts=2,
 )
 
 
@@ -55,8 +84,10 @@ class CaseReviewWorkflow:
                         workflow_input.review_run_id
                     ),
                 ),
-                start_to_close_timeout=ACTIVITY_TIMEOUT,
-                retry_policy=ACTIVITY_RETRY_POLICY,
+                start_to_close_timeout=(
+                    CONTROL_ACTIVITY_TIMEOUT
+                ),
+                retry_policy=CONTROL_RETRY_POLICY,
             )
 
             self._phase = "validating_documents"
@@ -64,9 +95,61 @@ class CaseReviewWorkflow:
             await workflow.execute_activity(
                 VALIDATE_DOCUMENTS_ACTIVITY,
                 workflow_input,
-                start_to_close_timeout=ACTIVITY_TIMEOUT,
-                retry_policy=ACTIVITY_RETRY_POLICY,
+                start_to_close_timeout=(
+                    CONTROL_ACTIVITY_TIMEOUT
+                ),
+                retry_policy=CONTROL_RETRY_POLICY,
             )
+
+            self._phase = "indexing_documents"
+
+            index_tasks = [
+                workflow.start_activity(
+                    INDEX_DOCUMENT_ACTIVITY,
+                    ReviewDocumentActivityInput(
+                        review_run_id=(
+                            workflow_input.review_run_id
+                        ),
+                        document_id=document_id,
+                    ),
+                    start_to_close_timeout=(
+                        AI_ACTIVITY_TIMEOUT
+                    ),
+                    retry_policy=AI_RETRY_POLICY,
+                    result_type=(
+                        ReviewDocumentIndexResult
+                    ),
+                )
+                for document_id
+                in workflow_input.document_ids
+            ]
+
+            await asyncio.gather(*index_tasks)
+
+            self._phase = "extracting_documents"
+
+            extraction_tasks = [
+                workflow.start_activity(
+                    EXTRACT_DOCUMENT_ACTIVITY,
+                    ReviewDocumentActivityInput(
+                        review_run_id=(
+                            workflow_input.review_run_id
+                        ),
+                        document_id=document_id,
+                    ),
+                    start_to_close_timeout=(
+                        AI_ACTIVITY_TIMEOUT
+                    ),
+                    retry_policy=AI_RETRY_POLICY,
+                    result_type=(
+                        ReviewDocumentExtractionResult
+                    ),
+                )
+                for document_id
+                in workflow_input.document_ids
+            ]
+
+            await asyncio.gather(*extraction_tasks)
 
             self._phase = "awaiting_human_review"
 
@@ -77,8 +160,10 @@ class CaseReviewWorkflow:
                         workflow_input.review_run_id
                     ),
                 ),
-                start_to_close_timeout=ACTIVITY_TIMEOUT,
-                retry_policy=ACTIVITY_RETRY_POLICY,
+                start_to_close_timeout=(
+                    CONTROL_ACTIVITY_TIMEOUT
+                ),
+                retry_policy=CONTROL_RETRY_POLICY,
             )
 
             await workflow.wait_condition(
@@ -103,8 +188,10 @@ class CaseReviewWorkflow:
                     decision=human_review.decision,
                     notes=human_review.notes,
                 ),
-                start_to_close_timeout=ACTIVITY_TIMEOUT,
-                retry_policy=ACTIVITY_RETRY_POLICY,
+                start_to_close_timeout=(
+                    CONTROL_ACTIVITY_TIMEOUT
+                ),
+                retry_policy=CONTROL_RETRY_POLICY,
                 result_type=CaseReviewWorkflowResult,
             )
 
@@ -126,9 +213,9 @@ class CaseReviewWorkflow:
                         ),
                     ),
                     start_to_close_timeout=(
-                        ACTIVITY_TIMEOUT
+                        CONTROL_ACTIVITY_TIMEOUT
                     ),
-                    retry_policy=ACTIVITY_RETRY_POLICY,
+                    retry_policy=CONTROL_RETRY_POLICY,
                 )
             except Exception:
                 pass

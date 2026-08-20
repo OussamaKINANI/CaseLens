@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 class CaseReviewWorkflowInput:
     review_run_id: str
     case_id: str
+
     document_ids: list[str] = field(
         default_factory=list
     )
@@ -13,6 +14,30 @@ class CaseReviewWorkflowInput:
 @dataclass
 class ReviewRunActivityInput:
     review_run_id: str
+
+
+@dataclass
+class ReviewDocumentActivityInput:
+    review_run_id: str
+    document_id: str
+
+
+@dataclass
+class ReviewDocumentIndexResult:
+    document_id: str
+    chunk_count: int
+    embedding_model: str
+    reused_existing: bool
+
+
+@dataclass
+class ReviewDocumentExtractionResult:
+    document_id: str
+    extraction_id: str
+    fact_count: int
+    provider_name: str
+    model_name: str
+    reused_existing: bool
 
 
 @dataclass

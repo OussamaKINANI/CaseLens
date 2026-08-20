@@ -8,7 +8,9 @@ from app.config import settings
 from app.review_activities import CaseReviewActivities
 from app.review_workflow import CaseReviewWorkflow
 from app.temporal_client import connect_temporal_client
-
+from app.review_processing_activities import (
+    ReviewProcessingActivities,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +24,9 @@ logging.basicConfig(
 async def run_worker() -> None:
     client = await connect_temporal_client()
     activities = CaseReviewActivities()
+    processing_activities = (
+        ReviewProcessingActivities()
+    )
 
     with ThreadPoolExecutor(
         max_workers=8,
@@ -40,6 +45,14 @@ async def run_worker() -> None:
                 (
                     activities
                     .validate_case_review_documents
+                ),
+                (
+                    processing_activities
+                    .index_case_review_document
+                ),
+                (
+                    processing_activities
+                    .extract_case_review_document
                 ),
                 (
                     activities
