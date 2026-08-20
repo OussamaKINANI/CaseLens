@@ -9,6 +9,9 @@ import {
   getReadiness,
   listCases,
 } from "./api";
+import {
+  CaseWorkspace,
+} from "./CaseWorkspace";
 
 import type {
   CaseStatus,
@@ -93,8 +96,49 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void loadDashboard();
-  }, [loadDashboard]);
+    let cancelled = false;
+
+    void Promise.allSettled([
+      listCases(),
+      getReadiness(),
+    ]).then(
+      ([
+        casesResult,
+        readinessResult,
+      ]) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (casesResult.status === "fulfilled") {
+          setCases(casesResult.value);
+        } else {
+          setError(
+            getErrorMessage(
+              casesResult.reason,
+            ),
+          );
+        }
+
+        if (
+          readinessResult.status ===
+          "fulfilled"
+        ) {
+          setReadiness(
+            readinessResult.value,
+          );
+        } else {
+          setReadiness(null);
+        }
+
+        setLoading(false);
+      },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredCases = useMemo(() => {
     const query = searchQuery
@@ -563,118 +607,15 @@ function App() {
       </main>
 
       {selectedCase && (
-        <div
-          className="drawer-backdrop"
-          role="presentation"
-          onMouseDown={() => {
+        <CaseWorkspace
+          clinicalCase={selectedCase}
+          onClose={() => {
             setSelectedCase(null);
           }}
-        >
-          <aside
-            className="case-drawer"
-            aria-label="Case details"
-            onMouseDown={(event) => {
-              event.stopPropagation();
-            }}
-          >
-            <div className="drawer-header">
-              <div>
-                <p className="eyebrow">
-                  Case overview
-                </p>
-
-                <h2>
-                  {
-                    selectedCase.patient_external_id
-                  }
-                </h2>
-              </div>
-
-              <button
-                className="close-button"
-                type="button"
-                onClick={() => {
-                  setSelectedCase(null);
-                }}
-                aria-label="Close case details"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="drawer-status-row">
-              <span
-                className={`status-badge ${selectedCase.status}`}
-              >
-                {
-                  STATUS_LABELS[
-                    selectedCase.status
-                  ]
-                }
-              </span>
-
-              <span
-                className={`priority-badge ${selectedCase.priority}`}
-              >
-                {selectedCase.priority}
-              </span>
-            </div>
-
-            <dl className="case-details">
-              <div>
-                <dt>Requested service</dt>
-                <dd>
-                  {
-                    selectedCase.requested_service
-                  }
-                </dd>
-              </div>
-
-              <div>
-                <dt>Created</dt>
-                <dd>
-                  {formatDate(
-                    selectedCase.created_at,
-                  )}
-                </dd>
-              </div>
-
-              <div>
-                <dt>Case identifier</dt>
-                <dd className="monospace">
-                  {selectedCase.id}
-                </dd>
-              </div>
-            </dl>
-
-            <div className="drawer-callout">
-              <span>Next</span>
-
-              <div>
-                <strong>
-                  Reviewer workspace
-                </strong>
-                <p>
-                  Documents, AI findings,
-                  citations, and human decisions
-                  will appear here next.
-                </p>
-              </div>
-            </div>
-
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => {
-                void navigator.clipboard.writeText(
-                  selectedCase.id,
-                );
-              }}
-            >
-              Copy case ID
-            </button>
-          </aside>
-        </div>
+          onCaseChanged={() => {
+            void loadDashboard();
+          }}
+        />
       )}
     </div>
   );
