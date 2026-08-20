@@ -1,3 +1,28 @@
+x-backend-environment: &backend-environment
+  ENVIRONMENT: container
+
+  DATABASE_URL: >-
+    postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+
+  TEST_DATABASE_URL: >-
+    postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/caselens_test
+
+  AI_PROVIDER: ${AI_PROVIDER:-fake}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+  OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-120}
+
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fake}
+  OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+
+  RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.50}
+
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+  TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-caselens-review}
+
+
 services:
   database:
     image: pgvector/pgvector:pg17
@@ -23,7 +48,8 @@ services:
         ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
 
   temporal:
     image: temporalio/temporal:1.8.2
@@ -44,6 +70,128 @@ services:
 
     volumes:
       - temporal_data:/home/temporal
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "temporal",
+          "operator",
+          "namespace",
+          "describe",
+          "--namespace",
+          "default",
+          "--address",
+          "127.0.0.1:7233",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+
+  migrations:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+    environment:
+      <<: *backend-environment
+
+    command:
+      [
+        "python",
+        "-m",
+        "alembic",
+        "upgrade",
+        "head",
+      ]
+
+    depends_on:
+      database:
+        condition: service_healthy
+
+    restart: "no"
+
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+    container_name: caselens-api
+    restart: unless-stopped
+
+    environment:
+      <<: *backend-environment
+
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      database:
+        condition: service_healthy
+
+      migrations:
+        condition: service_completed_successfully
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+    container_name: caselens-worker
+    restart: unless-stopped
+
+    environment:
+      <<: *backend-environment
+
+    command:
+      [
+        "python",
+        "-m",
+        "app.temporal_worker",
+      ]
+
+    depends_on:
+      database:
+        condition: service_healthy
+
+      migrations:
+        condition: service_completed_successfully
+
+      temporal:
+        condition: service_healthy
+
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+
+    container_name: caselens-frontend
+    restart: unless-stopped
+
+    ports:
+      - "3000:80"
+
+    depends_on:
+      api:
+        condition: service_healthy
 
 
 volumes:
