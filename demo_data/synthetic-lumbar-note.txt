@@ -1,0 +1,5 @@
+Synthetic clinical note.
+
+The patient reports persistent lower back pain for six weeks. Physical therapy was attempted for four weeks without improvement. The patient denies fever, weakness, and bowel or bladder dysfunction. A lumbar spine MRI was requested for further evaluation.
+
+This record contains synthetic demonstration data only.

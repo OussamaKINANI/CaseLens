@@ -214,3 +214,40 @@ export function submitHumanReview(
     ),
   );
 }
+export function createClinicalCase(
+  patientExternalId: string,
+  requestedService: string,
+  priority: "routine" | "urgent",
+): Promise<ClinicalCase> {
+  return request<ClinicalCase>(
+    "/v1/cases",
+    jsonOptions(
+      "POST",
+      {
+        patient_external_id: patientExternalId,
+        requested_service: requestedService,
+        priority,
+      },
+    ),
+  );
+}
+
+export function uploadClinicalDocument(
+  caseId: string,
+  file: File,
+): Promise<ClinicalDocument> {
+  const formData = new FormData();
+
+  formData.append(
+    "file",
+    file,
+  );
+
+  return request<ClinicalDocument>(
+    `/v1/cases/${caseId}/documents`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}

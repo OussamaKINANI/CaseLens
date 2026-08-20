@@ -12,6 +12,9 @@ import {
 import {
   CaseWorkspace,
 } from "./CaseWorkspace";
+import {
+  CaseIntake,
+} from "./CaseIntake";
 
 import type {
   CaseStatus,
@@ -59,6 +62,10 @@ function App() {
     useState<ReadinessResponse | null>(null);
   const [selectedCase, setSelectedCase] =
     useState<ClinicalCase | null>(null);
+  const [
+    showCaseIntake,
+    setShowCaseIntake,
+  ] = useState(false);
   const [statusFilter, setStatusFilter] =
     useState<StatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -299,6 +306,16 @@ function App() {
           </div>
 
           <div className="topbar-actions">
+            <button
+              className="new-case-button"
+              type="button"
+              onClick={() => {
+                setShowCaseIntake(true);
+              }}
+            >
+              <span aria-hidden="true">+</span>
+              New case
+            </button>
             <div
               className={
                 readiness
@@ -613,6 +630,18 @@ function App() {
             setSelectedCase(null);
           }}
           onCaseChanged={() => {
+            void loadDashboard();
+          }}
+        />
+      )}
+      {showCaseIntake && (
+        <CaseIntake
+          onClose={() => {
+            setShowCaseIntake(false);
+          }}
+          onCreated={(clinicalCase) => {
+            setShowCaseIntake(false);
+            setSelectedCase(clinicalCase);
             void loadDashboard();
           }}
         />

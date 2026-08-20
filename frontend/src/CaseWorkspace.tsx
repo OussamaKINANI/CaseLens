@@ -234,25 +234,67 @@ export function CaseWorkspace({
       return;
     }
 
-    const intervalId = window.setInterval(
-      () => {
-        void listCaseReviewRuns(
-          clinicalCase.id,
-        )
-          .then((runs) => {
-            setReviewRuns(runs);
-          })
-          .catch(() => {
-            // The visible manual refresh remains available.
-          });
-      },
-      3000,
-    );
+    let requestInProgress = false;
+
+    async function checkReviewStatus(): Promise<void> {
+      if (requestInProgress) {
+        return;
+      }
+
+      requestInProgress = true;
+
+      try {
+        const runs =
+          await listCaseReviewRuns(
+            clinicalCase.id,
+          );
+
+        setReviewRuns(runs);
+
+        const newestRun = [...runs].sort(
+          (left, right) =>
+            new Date(
+              right.created_at,
+            ).getTime() -
+            new Date(
+              left.created_at,
+            ).getTime(),
+        )[0];
+
+        if (
+          newestRun &&
+          newestRun.status !== "queued" &&
+          newestRun.status !== "running"
+        ) {
+          const data =
+            await fetchWorkspaceData(
+              clinicalCase.id,
+            );
+
+          applyWorkspaceData(data);
+        }
+      } catch {
+        // Manual refresh remains available.
+      } finally {
+        requestInProgress = false;
+      }
+    }
+
+    void checkReviewStatus();
+
+    const intervalId =
+      window.setInterval(
+        () => {
+          void checkReviewStatus();
+        },
+        3000,
+      );
 
     return () => {
       window.clearInterval(intervalId);
     };
   }, [
+    applyWorkspaceData,
     clinicalCase.id,
     latestRunIsProcessing,
   ]);
