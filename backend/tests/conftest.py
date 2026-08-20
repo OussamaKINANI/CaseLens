@@ -30,7 +30,7 @@ from app.extraction_service import (
 from app.main import app
 from app.models import CaseRecord
 from app.rag_models import DocumentChunkRecord
-
+from app.review_models import CaseReviewRunRecord
 
 test_engine = create_engine(
     settings.test_database_url,
@@ -46,23 +46,13 @@ TestSessionLocal = sessionmaker(
 
 def clear_test_database() -> None:
     with TestSessionLocal() as session:
-        session.execute(
-            delete(ClinicalExtractionRecord)
-        )
-        session.execute(
-            delete(DocumentChunkRecord)
-        )
-        session.execute(
-            delete(AuditEventRecord)
-        )
-        session.execute(
-            delete(ClinicalDocumentRecord)
-        )
-        session.execute(
-            delete(CaseRecord)
-        )
+        session.execute(delete(CaseReviewRunRecord))
+        session.execute(delete(ClinicalExtractionRecord))
+        session.execute(delete(DocumentChunkRecord))
+        session.execute(delete(AuditEventRecord))
+        session.execute(delete(ClinicalDocumentRecord))
+        session.execute(delete(CaseRecord))
         session.commit()
-
 
 @pytest.fixture
 def client() -> Generator[TestClient, None, None]:
