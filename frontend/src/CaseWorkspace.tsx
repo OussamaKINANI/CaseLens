@@ -1,9 +1,5 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AnimationEvent, KeyboardEvent, MouseEvent } from "react";
 
 import {
   answerCaseQuestion,
@@ -14,22 +10,27 @@ import {
   listCaseReviewRuns,
   startCaseReviewRun,
   submitHumanReview,
+  uploadClinicalDocument,
 } from "./api";
+import { DocumentDropzone } from "./components/DocumentDropzone";
+import { Icon } from "./components/Icon";
+import { validateClinicalDocument } from "./lib/documents";
+import { getErrorMessage, isAbortError } from "./lib/errors";
+import { formatBytes, formatDate, humanize } from "./lib/format";
 
 import type {
   AuditEvent,
   CaseAnswerResponse,
   CaseReviewRun,
+  CaseStatus,
   ClinicalCase,
   ClinicalDocument,
   ClinicalExtraction,
 } from "./types";
 
 
-type WorkspaceTab =
-  | "findings"
-  | "documents"
-  | "audit";
+type WorkspaceTab = "findings" | "documents" | "audit";
+type BusyAction = "start" | "approve" | "reject" | null;
 
 interface CaseWorkspaceProps {
   clinicalCase: ClinicalCase;
@@ -44,10 +45,13 @@ interface WorkspaceData {
   reviewRuns: CaseReviewRun[];
 }
 
-const REVIEW_STATUS_LABELS: Record<
-  CaseReviewRun["status"],
-  string
-> = {
+const TAB_ORDER: WorkspaceTab[] = ["findings", "documents", "audit"];
+
+const POLL_INTERVAL_MS = 3000;
+const DECISION_POLL_INTERVAL_MS = 500;
+const DECISION_POLL_ATTEMPTS = 10;
+
+const REVIEW_STATUS_LABELS: Record<CaseReviewRun["status"], string> = {
   queued: "Queued",
   running: "AI processing",
   awaiting_human_review: "Awaiting human review",
@@ -56,64 +60,56 @@ const REVIEW_STATUS_LABELS: Record<
   failed: "Failed",
 };
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(
-    "en-US",
-    {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    },
-  ).format(new Date(value));
+const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
+  received: "Received",
+  processing: "Processing",
+  awaiting_review: "Awaiting review",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
-function formatBytes(value: number): string {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-
-  return `${(value / 1024).toFixed(1)} KB`;
-}
-
-function humanize(value: string): string {
-  return value
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (character) =>
-      character.toUpperCase(),
-    );
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "An unexpected error occurred.";
+function newestRun(runs: CaseReviewRun[]): CaseReviewRun | null {
+  return (
+    [...runs].sort(
+      (left, right) =>
+        new Date(right.created_at).getTime() -
+        new Date(left.created_at).getTime(),
+    )[0] ?? null
+  );
 }
 
 async function fetchWorkspaceData(
   caseId: string,
+  signal?: AbortSignal,
 ): Promise<WorkspaceData> {
-  const [
-    documents,
-    extractions,
-    auditEvents,
-    reviewRuns,
-  ] = await Promise.all([
-    listCaseDocuments(caseId),
-    listCaseExtractions(caseId),
-    listCaseAuditEvents(caseId),
-    listCaseReviewRuns(caseId),
+  const [documents, extractions, auditEvents, reviewRuns] = await Promise.all([
+    listCaseDocuments(caseId, { signal }),
+    listCaseExtractions(caseId, { signal }),
+    listCaseAuditEvents(caseId, { signal }),
+    listCaseReviewRuns(caseId, { signal }),
   ]);
 
-  return {
-    documents,
-    extractions,
-    auditEvents,
-    reviewRuns,
-  };
+  return { documents, extractions, auditEvents, reviewRuns };
+}
+
+function WorkspaceSkeleton() {
+  return (
+    <div className="workspace-skeleton" aria-hidden="true">
+      {[0, 1, 2].map((index) => (
+        <div className="workspace-skeleton-card" key={index}>
+          <span className="skeleton" style={{ width: "34%" }} />
+          <span className="skeleton" style={{ width: "88%" }} />
+          <span className="skeleton" style={{ width: "72%" }} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function CaseWorkspace({
@@ -121,194 +117,199 @@ export function CaseWorkspace({
   onClose,
   onCaseChanged,
 }: CaseWorkspaceProps) {
-  const [activeTab, setActiveTab] =
-    useState<WorkspaceTab>("findings");
-  const [documents, setDocuments] =
-    useState<ClinicalDocument[]>([]);
-  const [extractions, setExtractions] =
-    useState<ClinicalExtraction[]>([]);
-  const [auditEvents, setAuditEvents] =
-    useState<AuditEvent[]>([]);
-  const [reviewRuns, setReviewRuns] =
-    useState<CaseReviewRun[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [actionBusy, setActionBusy] =
-    useState(false);
-  const [error, setError] =
-    useState<string | null>(null);
-  const [notice, setNotice] =
-    useState<string | null>(null);
-  const [reviewNotes, setReviewNotes] =
-    useState("");
-  const [question, setQuestion] =
-    useState(
-      "What clinically relevant treatment was attempted?",
-    );
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [closing, setClosing] = useState(false);
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("findings");
+  const [documents, setDocuments] = useState<ClinicalDocument[]>([]);
+  const [extractions, setExtractions] = useState<ClinicalExtraction[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [reviewRuns, setReviewRuns] = useState<CaseReviewRun[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [question, setQuestion] = useState(
+    "What clinically relevant treatment was attempted?",
+  );
+  const [questionError, setQuestionError] = useState<string | null>(null);
   const [answerResult, setAnswerResult] =
     useState<CaseAnswerResponse | null>(null);
-  const [askingQuestion, setAskingQuestion] =
-    useState(false);
+  const [askingQuestion, setAskingQuestion] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const applyWorkspaceData = useCallback(
-    (data: WorkspaceData) => {
-      setDocuments(data.documents);
-      setExtractions(data.extractions);
-      setAuditEvents(data.auditEvents);
-      setReviewRuns(data.reviewRuns);
-    },
-    [],
-  );
+  useEffect(() => {
+    const dialog = dialogRef.current;
+
+    if (dialog && !dialog.open) {
+      dialog.showModal();
+    }
+  }, []);
+
+  const applyWorkspaceData = useCallback((data: WorkspaceData) => {
+    setDocuments(data.documents);
+    setExtractions(data.extractions);
+    setAuditEvents(data.auditEvents);
+    setReviewRuns(data.reviewRuns);
+  }, []);
 
   const refreshWorkspace = useCallback(
-    async () => {
-      setLoading(true);
-      setError(null);
-
+    async (options?: { signal?: AbortSignal }) => {
       try {
         const data = await fetchWorkspaceData(
           clinicalCase.id,
+          options?.signal,
         );
 
         applyWorkspaceData(data);
+        setError(null);
       } catch (refreshError) {
-        setError(
-          getErrorMessage(refreshError),
-        );
+        if (!isAbortError(refreshError)) {
+          setError(getErrorMessage(refreshError));
+        }
       } finally {
-        setLoading(false);
+        setInitialLoading(false);
       }
     },
-    [
-      applyWorkspaceData,
-      clinicalCase.id,
-    ],
+    [applyWorkspaceData, clinicalCase.id],
   );
 
+  const handleManualRefresh = useCallback(() => {
+    setRefreshing(true);
+
+    void refreshWorkspace().finally(() => {
+      setRefreshing(false);
+    });
+  }, [refreshWorkspace]);
+
   useEffect(() => {
-    let cancelled = false;
-
-    void fetchWorkspaceData(
-      clinicalCase.id,
-    )
-      .then((data) => {
-        if (cancelled) {
-          return;
-        }
-
-        applyWorkspaceData(data);
-        setLoading(false);
-      })
-      .catch((loadError: unknown) => {
-        if (cancelled) {
-          return;
-        }
-
-        setError(
-          getErrorMessage(loadError),
-        );
-        setLoading(false);
-      });
+    const controller = new AbortController();
+    // False positive: every setState inside refreshWorkspace runs after
+    // the fetch resolves, never synchronously within this effect.
+    // eslint-disable-next-line react/set-state-in-effect
+    void refreshWorkspace({ signal: controller.signal });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [
-    applyWorkspaceData,
-    clinicalCase.id,
-  ]);
+  }, [refreshWorkspace]);
 
-  const latestReviewRun = useMemo(() => {
-    return [...reviewRuns].sort(
-      (left, right) =>
-        new Date(right.created_at).getTime() -
-        new Date(left.created_at).getTime(),
-    )[0] ?? null;
-  }, [reviewRuns]);
+  // Success notices dismiss themselves.
+  useEffect(() => {
+    if (!notice) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [notice]);
+
+  const latestReviewRun = useMemo(
+    () => newestRun(reviewRuns),
+    [reviewRuns],
+  );
 
   const latestRunIsProcessing =
     latestReviewRun?.status === "queued" ||
     latestReviewRun?.status === "running";
 
+  // Poll while Temporal is processing; pause in hidden tabs; notify the
+  // dashboard as soon as the run leaves its processing states.
   useEffect(() => {
     if (!latestRunIsProcessing) {
       return;
     }
 
-    let requestInProgress = false;
+    let cancelled = false;
+    let running = false;
+    let timeoutId: number | undefined;
 
-    async function checkReviewStatus(): Promise<void> {
-      if (requestInProgress) {
-        return;
-      }
-
-      requestInProgress = true;
-
-      try {
-        const runs =
-          await listCaseReviewRuns(
-            clinicalCase.id,
-          );
-
-        setReviewRuns(runs);
-
-        const newestRun = [...runs].sort(
-          (left, right) =>
-            new Date(
-              right.created_at,
-            ).getTime() -
-            new Date(
-              left.created_at,
-            ).getTime(),
-        )[0];
-
-        if (
-          newestRun &&
-          newestRun.status !== "queued" &&
-          newestRun.status !== "running"
-        ) {
-          const data =
-            await fetchWorkspaceData(
-              clinicalCase.id,
-            );
-
-          applyWorkspaceData(data);
-        }
-      } catch {
-        // Manual refresh remains available.
-      } finally {
-        requestInProgress = false;
+    function schedule() {
+      if (!cancelled) {
+        timeoutId = window.setTimeout(() => {
+          void tick();
+        }, POLL_INTERVAL_MS);
       }
     }
 
-    void checkReviewStatus();
+    async function tick() {
+      if (cancelled || running) {
+        return;
+      }
 
-    const intervalId =
-      window.setInterval(
-        () => {
-          void checkReviewStatus();
-        },
-        3000,
-      );
+      if (document.visibilityState !== "visible") {
+        schedule();
+        return;
+      }
+
+      running = true;
+
+      try {
+        const runs = await listCaseReviewRuns(clinicalCase.id);
+
+        if (cancelled) {
+          return;
+        }
+
+        setReviewRuns(runs);
+
+        const newest = newestRun(runs);
+
+        if (
+          newest &&
+          newest.status !== "queued" &&
+          newest.status !== "running"
+        ) {
+          await refreshWorkspace();
+          onCaseChanged();
+          return;
+        }
+      } catch {
+        // Transient polling failures are ignored; manual refresh remains.
+      } finally {
+        running = false;
+      }
+
+      schedule();
+    }
+
+    void tick();
+
+    function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        window.clearTimeout(timeoutId);
+        void tick();
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
-      window.clearInterval(intervalId);
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [
-    applyWorkspaceData,
     clinicalCase.id,
     latestRunIsProcessing,
+    onCaseChanged,
+    refreshWorkspace,
   ]);
 
   const facts = useMemo(() => {
-    return extractions.flatMap(
-      (extraction) =>
-        extraction.result.facts.map(
-          (fact) => ({
-            ...fact,
-            extractionId: extraction.id,
-            documentId: extraction.document_id,
-          }),
-        ),
+    return extractions.flatMap((extraction) =>
+      extraction.result.facts.map((fact) => ({
+        ...fact,
+        extractionId: extraction.id,
+        documentId: extraction.document_id,
+      })),
     );
   }, [extractions]);
 
@@ -316,9 +317,7 @@ export function CaseWorkspace({
     return Array.from(
       new Set(
         extractions.flatMap(
-          (extraction) =>
-            extraction.result
-              .missing_information,
+          (extraction) => extraction.result.missing_information,
         ),
       ),
     );
@@ -326,53 +325,97 @@ export function CaseWorkspace({
 
   const warnings = useMemo(() => {
     return Array.from(
-      new Set(
-        extractions.flatMap(
-          (extraction) =>
-            extraction.result.warnings,
-        ),
-      ),
+      new Set(extractions.flatMap((extraction) => extraction.result.warnings)),
     );
   }, [extractions]);
 
-  async function startReview(): Promise<void> {
-    if (documents.length === 0) {
-      setError(
-        "Upload at least one document before starting a review.",
-      );
+  const documentNames = useMemo(
+    () => new Map(documents.map((doc) => [doc.id, doc.filename])),
+    [documents],
+  );
+
+  const sortedAuditEvents = useMemo(() => {
+    return [...auditEvents].sort(
+      (left, right) =>
+        new Date(right.created_at).getTime() -
+        new Date(left.created_at).getTime(),
+    );
+  }, [auditEvents]);
+
+  function documentName(documentId: string): string {
+    return documentNames.get(documentId) ?? "Unknown document";
+  }
+
+  function beginClose() {
+    setClosing(true);
+  }
+
+  function requestClose() {
+    if (closing) {
       return;
     }
 
-    setActionBusy(true);
+    beginClose();
+  }
+
+  function handleBackdropMouseDown(event: MouseEvent<HTMLDialogElement>) {
+    if (event.target === dialogRef.current) {
+      requestClose();
+    }
+  }
+
+  function handleAnimationEnd(event: AnimationEvent<HTMLDialogElement>) {
+    if (closing && event.animationName === "workspace-exit") {
+      onClose();
+    }
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const index = TAB_ORDER.indexOf(activeTab);
+    let next: WorkspaceTab | null = null;
+
+    if (event.key === "ArrowRight") {
+      next = TAB_ORDER[(index + 1) % TAB_ORDER.length];
+    } else if (event.key === "ArrowLeft") {
+      next = TAB_ORDER[(index + TAB_ORDER.length - 1) % TAB_ORDER.length];
+    } else if (event.key === "Home") {
+      next = TAB_ORDER[0];
+    } else if (event.key === "End") {
+      next = TAB_ORDER[TAB_ORDER.length - 1];
+    }
+
+    if (next) {
+      event.preventDefault();
+      setActiveTab(next);
+      document.getElementById(`workspace-tab-${next}`)?.focus();
+    }
+  }
+
+  async function startReview(): Promise<void> {
+    if (documents.length === 0) {
+      return;
+    }
+
+    setBusyAction("start");
     setError(null);
     setNotice(null);
 
     try {
-      const reviewRun =
-        await createCaseReviewRun(
-          clinicalCase.id,
-          documents.map(
-            (document) => document.id,
-          ),
-        );
-
-      await startCaseReviewRun(
+      const reviewRun = await createCaseReviewRun(
         clinicalCase.id,
-        reviewRun.id,
+        documents.map((doc) => doc.id),
       );
 
-      setNotice(
-        "Durable AI review started.",
-      );
+      await startCaseReviewRun(clinicalCase.id, reviewRun.id);
+
+      setNotice("Durable AI review started.");
 
       await refreshWorkspace();
       onCaseChanged();
     } catch (startError) {
-      setError(
-        getErrorMessage(startError),
-      );
+      setError(getErrorMessage(startError));
     } finally {
-      setActionBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -381,145 +424,182 @@ export function CaseWorkspace({
   ): Promise<void> {
     if (
       !latestReviewRun ||
-      latestReviewRun.status !==
-        "awaiting_human_review"
+      latestReviewRun.status !== "awaiting_human_review"
     ) {
       return;
     }
 
-    setActionBusy(true);
+    const reviewRunId = latestReviewRun.id;
+
+    setBusyAction(decision);
     setError(null);
     setNotice(null);
 
     try {
       await submitHumanReview(
         clinicalCase.id,
-        latestReviewRun.id,
+        reviewRunId,
         decision,
         reviewNotes.trim() || null,
       );
 
-      setNotice(
-        decision === "approve"
-          ? "Review approved successfully."
-          : "Review rejected successfully.",
-      );
+      // Wait for the durable state transition instead of guessing with a
+      // fixed sleep; the workflow usually lands within a poll or two. The
+      // decision itself already succeeded, so polling is best-effort.
+      try {
+        for (
+          let attempt = 0;
+          attempt < DECISION_POLL_ATTEMPTS;
+          attempt += 1
+        ) {
+          const runs = await listCaseReviewRuns(clinicalCase.id);
+          const updated = runs.find((run) => run.id === reviewRunId);
 
-      setReviewNotes("");
+          if (updated && updated.status !== "awaiting_human_review") {
+            break;
+          }
 
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, 1200);
-      });
+          await delay(DECISION_POLL_INTERVAL_MS);
+        }
+      } catch {
+        // The refresh below still shows the latest durable state.
+      }
 
       await refreshWorkspace();
       onCaseChanged();
-    } catch (decisionError) {
-      setError(
-        getErrorMessage(decisionError),
+
+      setNotice(
+        decision === "approve"
+          ? "Review approved and recorded."
+          : "Review rejected and recorded.",
       );
+
+      setReviewNotes("");
+    } catch (decisionError) {
+      setError(getErrorMessage(decisionError));
     } finally {
-      setActionBusy(false);
+      setBusyAction(null);
     }
   }
 
   async function askQuestion(): Promise<void> {
-    const normalizedQuestion =
-      question.trim();
+    const normalizedQuestion = question.trim();
 
     if (!normalizedQuestion) {
-      setError(
-        "Enter a question before asking CaseLens.",
-      );
+      setQuestionError("Enter a question before asking CaseLens.");
       return;
     }
 
     setAskingQuestion(true);
-    setError(null);
-    setAnswerResult(null);
+    setQuestionError(null);
 
     try {
-      const result =
-        await answerCaseQuestion(
-          clinicalCase.id,
-          normalizedQuestion,
-          3,
-        );
+      const result = await answerCaseQuestion(
+        clinicalCase.id,
+        normalizedQuestion,
+        3,
+      );
 
       setAnswerResult(result);
-    } catch (questionError) {
-      setError(
-        getErrorMessage(questionError),
-      );
+    } catch (askError) {
+      setQuestionError(getErrorMessage(askError));
     } finally {
       setAskingQuestion(false);
     }
   }
 
+  async function handleWorkspaceUpload(file: File): Promise<void> {
+    const validationError = validateClinicalDocument(file);
+
+    if (validationError) {
+      setUploadError(validationError);
+      return;
+    }
+
+    setUploading(true);
+    setUploadError(null);
+
+    try {
+      await uploadClinicalDocument(clinicalCase.id, file);
+      await refreshWorkspace();
+      setNotice(`Uploaded ${file.name}.`);
+    } catch (uploadFailure) {
+      setUploadError(getErrorMessage(uploadFailure));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const runIsClosed =
+    latestReviewRun !== null &&
+    ["completed", "rejected", "failed"].includes(latestReviewRun.status);
+
+  const canStartReview = !latestReviewRun || runIsClosed;
+
+  const tabs: Array<{ id: WorkspaceTab; label: string; count: number }> = [
+    { id: "findings", label: "AI findings", count: facts.length },
+    { id: "documents", label: "Documents", count: documents.length },
+    { id: "audit", label: "Audit trail", count: auditEvents.length },
+  ];
+
   return (
-    <div
-      className="workspace-backdrop"
-      role="presentation"
-      onMouseDown={onClose}
+    <dialog
+      ref={dialogRef}
+      className={`review-workspace${closing ? " closing" : ""}`}
+      aria-label="Clinical case reviewer workspace"
+      onCancel={(event) => {
+        event.preventDefault();
+        requestClose();
+      }}
+      onMouseDown={handleBackdropMouseDown}
+      onAnimationEnd={handleAnimationEnd}
     >
-      <section
-        className="review-workspace"
-        aria-label="Clinical case reviewer workspace"
-        onMouseDown={(event) => {
-          event.stopPropagation();
-        }}
-      >
+      <div className="workspace-scroll">
         <header className="workspace-header">
           <div className="workspace-title">
             <button
               className="workspace-close"
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               aria-label="Close reviewer workspace"
             >
-              ←
+              <Icon name="arrow-left" size={17} />
             </button>
 
             <div>
-              <p className="eyebrow">
-                Reviewer workspace
-              </p>
+              <p className="eyebrow">Reviewer workspace</p>
 
-              <h2>
-                {
-                  clinicalCase.patient_external_id
-                }
-              </h2>
+              <h2>{clinicalCase.patient_external_id}</h2>
 
-              <p>
-                {
-                  clinicalCase.requested_service
-                }
-              </p>
+              <p>{clinicalCase.requested_service}</p>
             </div>
           </div>
 
           <div className="workspace-header-actions">
+            <span className={`status-badge ${clinicalCase.status}`}>
+              {CASE_STATUS_LABELS[clinicalCase.status]}
+            </span>
+
             {latestReviewRun && (
               <span
                 className={`review-run-status ${latestReviewRun.status}`}
               >
-                {
-                  REVIEW_STATUS_LABELS[
-                    latestReviewRun.status
-                  ]
-                }
+                {REVIEW_STATUS_LABELS[latestReviewRun.status]}
               </span>
             )}
 
             <button
               className="workspace-refresh"
               type="button"
-              onClick={() => {
-                void refreshWorkspace();
-              }}
-              disabled={loading}
+              onClick={handleManualRefresh}
+              disabled={refreshing}
             >
-              ↻ Refresh
+              <Icon
+                name="refresh"
+                size={13}
+                className={refreshing ? "spin" : undefined}
+              />
+              Refresh
             </button>
           </div>
         </header>
@@ -527,11 +607,7 @@ export function CaseWorkspace({
         <div className="workspace-summary">
           <div>
             <span>Priority</span>
-            <strong>
-              {humanize(
-                clinicalCase.priority,
-              )}
-            </strong>
+            <strong>{humanize(clinicalCase.priority)}</strong>
           </div>
 
           <div>
@@ -550,92 +626,86 @@ export function CaseWorkspace({
           </div>
         </div>
 
-        <nav
+        <div
           className="workspace-tabs"
+          role="tablist"
           aria-label="Case workspace sections"
         >
-          <button
-            className={
-              activeTab === "findings"
-                ? "active"
-                : ""
-            }
-            type="button"
-            onClick={() => {
-              setActiveTab("findings");
-            }}
-          >
-            AI findings
-            <span>{facts.length}</span>
-          </button>
-
-          <button
-            className={
-              activeTab === "documents"
-                ? "active"
-                : ""
-            }
-            type="button"
-            onClick={() => {
-              setActiveTab("documents");
-            }}
-          >
-            Documents
-            <span>{documents.length}</span>
-          </button>
-
-          <button
-            className={
-              activeTab === "audit"
-                ? "active"
-                : ""
-            }
-            type="button"
-            onClick={() => {
-              setActiveTab("audit");
-            }}
-          >
-            Audit trail
-            <span>{auditEvents.length}</span>
-          </button>
-        </nav>
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              id={`workspace-tab-${tab.id}`}
+              role="tab"
+              type="button"
+              aria-selected={activeTab === tab.id}
+              aria-controls={`workspace-panel-${tab.id}`}
+              tabIndex={activeTab === tab.id ? 0 : -1}
+              className={activeTab === tab.id ? "active" : ""}
+              onClick={() => {
+                setActiveTab(tab.id);
+              }}
+              onKeyDown={handleTabKeyDown}
+            >
+              {tab.label}
+              <span>{tab.count}</span>
+            </button>
+          ))}
+        </div>
 
         {error && (
-          <div className="workspace-message error">
+          <div className="workspace-message error" role="alert">
             <strong>Action failed</strong>
             <p>{error}</p>
+
+            <button
+              className="message-dismiss"
+              type="button"
+              onClick={() => {
+                setError(null);
+              }}
+              aria-label="Dismiss error"
+            >
+              <Icon name="close" size={13} />
+            </button>
           </div>
         )}
 
         {notice && (
-          <div className="workspace-message success">
+          <div className="workspace-message success" role="status">
             <strong>Success</strong>
             <p>{notice}</p>
+
+            <button
+              className="message-dismiss"
+              type="button"
+              onClick={() => {
+                setNotice(null);
+              }}
+              aria-label="Dismiss notice"
+            >
+              <Icon name="close" size={13} />
+            </button>
           </div>
         )}
 
         <div className="workspace-body">
-          <main className="workspace-primary">
-            {loading ? (
-              <div className="workspace-loading">
-                <span />
-                <strong>
-                  Loading clinical evidence
-                </strong>
-              </div>
+          <main
+            className="workspace-primary"
+            id={`workspace-panel-${activeTab}`}
+            role="tabpanel"
+            aria-labelledby={`workspace-tab-${activeTab}`}
+          >
+            {initialLoading ? (
+              <WorkspaceSkeleton />
             ) : (
-              <>
+              <div className="tab-panel" key={activeTab}>
                 {activeTab === "findings" && (
                   <div className="findings-view">
                     <section className="workspace-section">
                       <div className="section-heading">
                         <div>
-                          <p className="eyebrow">
-                            Structured extraction
-                          </p>
-                          <h3>
-                            Evidence-grounded facts
-                          </h3>
+                          <p className="eyebrow">Structured extraction</p>
+                          <h3>Evidence-grounded facts</h3>
                         </div>
 
                         <span className="section-count">
@@ -645,125 +715,83 @@ export function CaseWorkspace({
 
                       {facts.length === 0 ? (
                         <div className="workspace-empty">
-                          <strong>
-                            No AI findings yet
-                          </strong>
+                          <strong>No AI findings yet</strong>
                           <p>
-                            Start a durable review to
-                            index documents and extract
-                            supported clinical facts.
+                            Start a durable review to index documents and
+                            extract supported clinical facts.
                           </p>
                         </div>
                       ) : (
                         <div className="fact-list">
-                          {facts.map(
-                            (
-                              fact,
-                              factIndex,
-                            ) => (
-                              <article
-                                className="fact-card"
-                                key={`${fact.extractionId}-${factIndex}`}
-                              >
-                                <div className="fact-card-heading">
-                                  <div>
-                                    <span className="fact-type">
-                                      {humanize(
-                                        fact.fact_type,
-                                      )}
-                                    </span>
-
-                                    <h4>
-                                      {fact.name}
-                                    </h4>
-                                  </div>
-
-                                  <span
-                                    className={`assertion ${fact.assertion}`}
-                                  >
-                                    {humanize(
-                                      fact.assertion,
-                                    )}
+                          {facts.map((fact, factIndex) => (
+                            <article
+                              className="fact-card"
+                              key={`${fact.extractionId}-${factIndex}`}
+                            >
+                              <div className="fact-card-heading">
+                                <div>
+                                  <span className="fact-type">
+                                    {humanize(fact.fact_type)}
                                   </span>
+
+                                  <h4>{fact.name}</h4>
                                 </div>
 
-                                {fact.value && (
-                                  <p className="fact-value">
-                                    {fact.value}
-                                  </p>
+                                <span
+                                  className={`assertion ${fact.assertion}`}
+                                >
+                                  {humanize(fact.assertion)}
+                                </span>
+                              </div>
+
+                              {fact.value && (
+                                <p className="fact-value">{fact.value}</p>
+                              )}
+
+                              <div className="evidence-list">
+                                {fact.evidence.map(
+                                  (citation, citationIndex) => (
+                                    <blockquote
+                                      key={`${citation.document_id}-${citationIndex}`}
+                                    >
+                                      “{citation.exact_quote}”
+                                      <footer>
+                                        {documentName(citation.document_id)}
+                                        {" · chars "}
+                                        {citation.start_char}–
+                                        {citation.end_char}
+                                      </footer>
+                                    </blockquote>
+                                  ),
                                 )}
-
-                                <div className="evidence-list">
-                                  {fact.evidence.map(
-                                    (
-                                      citation,
-                                      citationIndex,
-                                    ) => (
-                                      <blockquote
-                                        key={`${citation.document_id}-${citationIndex}`}
-                                      >
-                                        “
-                                        {
-                                          citation.exact_quote
-                                        }
-                                        ”
-                                        <footer>
-                                          Source characters{" "}
-                                          {
-                                            citation.start_char
-                                          }
-                                          –
-                                          {
-                                            citation.end_char
-                                          }
-                                        </footer>
-                                      </blockquote>
-                                    ),
-                                  )}
-                                </div>
-                              </article>
-                            ),
-                          )}
+                              </div>
+                            </article>
+                          ))}
                         </div>
                       )}
                     </section>
 
                     {(warnings.length > 0 ||
-                      missingInformation.length >
-                        0) && (
+                      missingInformation.length > 0) && (
                       <section className="workspace-section">
                         <div className="section-heading">
                           <div>
-                            <p className="eyebrow">
-                              Safety review
-                            </p>
-                            <h3>
-                              Gaps and warnings
-                            </h3>
+                            <p className="eyebrow">Safety review</p>
+                            <h3>Gaps and warnings</h3>
                           </div>
                         </div>
 
                         <div className="safety-grid">
                           <div>
-                            <h4>
-                              Missing information
-                            </h4>
+                            <h4>Missing information</h4>
 
-                            {missingInformation.length ===
-                            0 ? (
-                              <p>
-                                No missing information
-                                reported.
-                              </p>
+                            {missingInformation.length === 0 ? (
+                              <p>No missing information reported.</p>
                             ) : (
                               <ul>
-                                {missingInformation.map(
-                                  (item) => (
-                                    <li key={item}>
-                                      {item}
-                                    </li>
-                                  ),
-                                )}
+                                {missingInformation.map((item) => (
+                                  <li key={item}>{item}</li>
+                                ))}
                               </ul>
                             )}
                           </div>
@@ -772,18 +800,12 @@ export function CaseWorkspace({
                             <h4>Warnings</h4>
 
                             {warnings.length === 0 ? (
-                              <p>
-                                No extraction warnings.
-                              </p>
+                              <p>No extraction warnings.</p>
                             ) : (
                               <ul>
-                                {warnings.map(
-                                  (item) => (
-                                    <li key={item}>
-                                      {item}
-                                    </li>
-                                  ),
-                                )}
+                                {warnings.map((item) => (
+                                  <li key={item}>{item}</li>
+                                ))}
                               </ul>
                             )}
                           </div>
@@ -794,95 +816,109 @@ export function CaseWorkspace({
                     <section className="workspace-section">
                       <div className="section-heading">
                         <div>
-                          <p className="eyebrow">
-                            Grounded assistant
-                          </p>
-                          <h3>
-                            Ask the indexed case
-                          </h3>
+                          <p className="eyebrow">Grounded assistant</p>
+                          <h3>Ask the indexed case</h3>
                         </div>
                       </div>
 
-                      <div className="question-form">
+                      <form
+                        className="question-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void askQuestion();
+                        }}
+                      >
+                        <label className="sr-only" htmlFor="case-question">
+                          Question for the indexed case documents
+                        </label>
+
                         <textarea
+                          id="case-question"
                           value={question}
                           onChange={(event) => {
-                            setQuestion(
-                              event.target.value,
-                            );
+                            setQuestion(event.target.value);
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              (event.ctrlKey || event.metaKey) &&
+                              event.key === "Enter"
+                            ) {
+                              event.preventDefault();
+                              void askQuestion();
+                            }
                           }}
                           rows={3}
                           maxLength={2000}
+                          placeholder="Ask about the indexed case documents"
                         />
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void askQuestion();
-                          }}
-                          disabled={askingQuestion}
-                        >
-                          {askingQuestion
-                            ? "Generating grounded answer…"
-                            : "Ask CaseLens"}
-                        </button>
-                      </div>
-
-                      {answerResult && (
-                        <article
-                          className={
-                            answerResult.answer
-                              .supported
-                              ? "answer-card supported"
-                              : "answer-card unsupported"
-                          }
-                        >
-                          <div className="answer-heading">
-                            <span>
-                              {answerResult.answer
-                                .supported
-                                ? "Supported answer"
-                                : "Insufficient evidence"}
-                            </span>
-
-                            <small>
-                              Similarity threshold{" "}
-                              {
-                                answerResult.min_similarity
-                              }
-                            </small>
-                          </div>
-
-                          <p>
-                            {
-                              answerResult.answer
-                                .answer
-                            }
+                        {questionError && (
+                          <p className="field-error" role="alert">
+                            {questionError}
                           </p>
+                        )}
 
-                          {answerResult.answer
-                            .citations.length > 0 && (
-                            <div className="answer-citations">
-                              {answerResult.answer.citations.map(
-                                (
-                                  citation,
-                                  index,
-                                ) => (
-                                  <blockquote
-                                    key={`${citation.chunk_id}-${index}`}
-                                  >
-                                    “
-                                    {
-                                      citation.exact_quote
-                                    }
-                                    ”
-                                  </blockquote>
-                                ),
-                              )}
+                        <div className="question-actions">
+                          <small>Ctrl+Enter to ask</small>
+
+                          <button
+                            className="btn btn-primary btn-sm"
+                            type="submit"
+                            disabled={askingQuestion}
+                          >
+                            {askingQuestion
+                              ? "Generating grounded answer…"
+                              : "Ask CaseLens"}
+                          </button>
+                        </div>
+                      </form>
+
+                      <div aria-live="polite">
+                        {answerResult && (
+                          <article
+                            className={`answer-card ${
+                              answerResult.answer.supported
+                                ? "supported"
+                                : "unsupported"
+                            }${askingQuestion ? " stale" : ""}`}
+                          >
+                            <div className="answer-heading">
+                              <span>
+                                {answerResult.answer.supported
+                                  ? "Supported answer"
+                                  : "Insufficient evidence"}
+                              </span>
+
+                              <small>
+                                Min similarity{" "}
+                                {answerResult.min_similarity.toFixed(2)}
+                              </small>
                             </div>
-                          )}
-                        </article>
-                      )}
+
+                            <p>{answerResult.answer.answer}</p>
+
+                            {answerResult.answer.citations.length > 0 && (
+                              <div className="answer-citations">
+                                {answerResult.answer.citations.map(
+                                  (citation, index) => (
+                                    <blockquote
+                                      key={`${citation.chunk_id}-${index}`}
+                                    >
+                                      “{citation.exact_quote}”
+                                      <footer>
+                                        {documentName(citation.document_id)}
+                                        {" · chars "}
+                                        {citation.start_char}–
+                                        {citation.end_char}
+                                      </footer>
+                                    </blockquote>
+                                  ),
+                                )}
+                              </div>
+                            )}
+                          </article>
+                        )}
+                      </div>
                     </section>
                   </div>
                 )}
@@ -891,67 +927,61 @@ export function CaseWorkspace({
                   <section className="workspace-section">
                     <div className="section-heading">
                       <div>
-                        <p className="eyebrow">
-                          Source records
-                        </p>
-                        <h3>
-                          Clinical documents
-                        </h3>
+                        <p className="eyebrow">Source records</p>
+                        <h3>Clinical documents</h3>
                       </div>
                     </div>
 
                     {documents.length === 0 ? (
                       <div className="workspace-empty">
-                        <strong>
-                          No documents uploaded
-                        </strong>
+                        <strong>No documents uploaded</strong>
                         <p>
-                          This case has no reviewable
-                          clinical evidence.
+                          Upload a synthetic clinical note below to give this
+                          case reviewable evidence.
                         </p>
                       </div>
                     ) : (
                       <div className="document-list">
-                        {documents.map(
-                          (document) => (
-                            <article
-                              key={document.id}
-                            >
-                              <div className="document-icon">
-                                TXT
-                              </div>
+                        {documents.map((doc) => (
+                          <article key={doc.id}>
+                            <div className="document-icon">
+                              <Icon name="file" size={17} />
+                            </div>
 
-                              <div>
-                                <strong>
-                                  {
-                                    document.filename
-                                  }
-                                </strong>
+                            <div>
+                              <strong>{doc.filename}</strong>
 
-                                <p>
-                                  {formatBytes(
-                                    document.size_bytes,
-                                  )}
-                                  {" · "}
-                                  {formatDate(
-                                    document.uploaded_at,
-                                  )}
-                                </p>
+                              <p>
+                                {formatBytes(doc.size_bytes)}
+                                {" · "}
+                                {formatDate(doc.uploaded_at)}
+                              </p>
 
-                                <small>
-                                  SHA-256{" "}
-                                  {document.content_sha256.slice(
-                                    0,
-                                    18,
-                                  )}
-                                  …
-                                </small>
-                              </div>
-                            </article>
-                          ),
-                        )}
+                              <small>
+                                SHA-256 {doc.content_sha256.slice(0, 18)}…
+                              </small>
+                            </div>
+                          </article>
+                        ))}
                       </div>
                     )}
+
+                    <div className="workspace-upload">
+                      <DocumentDropzone
+                        file={null}
+                        onFile={(file) => {
+                          void handleWorkspaceUpload(file);
+                        }}
+                        busy={uploading}
+                        prompt="Add a synthetic clinical document"
+                      />
+
+                      {uploadError && (
+                        <p className="field-error" role="alert">
+                          {uploadError}
+                        </p>
+                      )}
+                    </div>
                   </section>
                 )}
 
@@ -959,64 +989,63 @@ export function CaseWorkspace({
                   <section className="workspace-section">
                     <div className="section-heading">
                       <div>
-                        <p className="eyebrow">
-                          Immutable history
-                        </p>
-                        <h3>
-                          Case audit trail
-                        </h3>
+                        <p className="eyebrow">Immutable history</p>
+                        <h3>Case audit trail</h3>
                       </div>
                     </div>
 
-                    <div className="audit-timeline">
-                      {[...auditEvents]
-                        .reverse()
-                        .map((event) => (
+                    {sortedAuditEvents.length === 0 ? (
+                      <div className="workspace-empty">
+                        <strong>No audit events yet</strong>
+                        <p>
+                          Case and workflow actions are recorded here as they
+                          happen.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="audit-timeline">
+                        {sortedAuditEvents.map((event) => (
                           <article
                             key={event.id}
+                            className={
+                              event.actor_type === "reviewer"
+                                ? "reviewer-event"
+                                : undefined
+                            }
                           >
                             <span className="audit-dot" />
 
                             <div>
                               <div className="audit-heading">
-                                <strong>
-                                  {humanize(
-                                    event.event_type,
-                                  )}
-                                </strong>
+                                <strong>{humanize(event.event_type)}</strong>
 
-                                <span>
-                                  {event.actor_type}
-                                </span>
+                                <span>{event.actor_type}</span>
                               </div>
 
-                              <time>
-                                {formatDate(
-                                  event.created_at,
-                                )}
-                              </time>
+                              <time>{formatDate(event.created_at)}</time>
 
-                              <pre>
-                                {JSON.stringify(
-                                  event.details,
-                                  null,
-                                  2,
-                                )}
-                              </pre>
+                              {Object.keys(event.details).length > 0 && (
+                                <details className="audit-details">
+                                  <summary>Details</summary>
+
+                                  <pre>
+                                    {JSON.stringify(event.details, null, 2)}
+                                  </pre>
+                                </details>
+                              )}
                             </div>
                           </article>
                         ))}
-                    </div>
+                      </div>
+                    )}
                   </section>
                 )}
-              </>
+              </div>
             )}
           </main>
 
           <aside className="workspace-review-panel">
-            <p className="eyebrow">
-              Human oversight
-            </p>
+            <p className="eyebrow">Human oversight</p>
 
             <h3>Review decision</h3>
 
@@ -1025,30 +1054,19 @@ export function CaseWorkspace({
                 <div className="run-summary">
                   <span>Latest run</span>
                   <strong>
-                    {
-                      REVIEW_STATUS_LABELS[
-                        latestReviewRun.status
-                      ]
-                    }
+                    {REVIEW_STATUS_LABELS[latestReviewRun.status]}
                   </strong>
-                  <small>
-                    {formatDate(
-                      latestReviewRun.created_at,
-                    )}
-                  </small>
+                  <small>{formatDate(latestReviewRun.created_at)}</small>
                 </div>
 
-                {latestReviewRun.status ===
-                  "awaiting_human_review" && (
+                {latestReviewRun.status === "awaiting_human_review" && (
                   <div className="decision-form">
                     <label>
                       Reviewer notes
                       <textarea
                         value={reviewNotes}
                         onChange={(event) => {
-                          setReviewNotes(
-                            event.target.value,
-                          );
+                          setReviewNotes(event.target.value);
                         }}
                         rows={5}
                         maxLength={2000}
@@ -1057,114 +1075,112 @@ export function CaseWorkspace({
                     </label>
 
                     <button
-                      className="approve-button"
+                      className="btn btn-primary btn-block"
                       type="button"
-                      disabled={actionBusy}
+                      disabled={busyAction !== null}
                       onClick={() => {
-                        void submitDecision(
-                          "approve",
-                        );
+                        void submitDecision("approve");
                       }}
                     >
-                      Approve review
+                      {busyAction === "approve"
+                        ? "Approving…"
+                        : "Approve review"}
                     </button>
 
                     <button
-                      className="reject-button"
+                      className="btn btn-danger btn-block"
                       type="button"
-                      disabled={actionBusy}
+                      disabled={busyAction !== null}
                       onClick={() => {
-                        void submitDecision(
-                          "reject",
-                        );
+                        void submitDecision("reject");
                       }}
                     >
-                      Reject review
+                      {busyAction === "reject"
+                        ? "Rejecting…"
+                        : "Reject review"}
                     </button>
                   </div>
                 )}
 
-                {(latestReviewRun.status ===
-                  "queued" ||
-                  latestReviewRun.status ===
-                    "running") && (
+                {latestRunIsProcessing && (
                   <div className="processing-state">
                     <span />
-                    <strong>
-                      Durable processing active
-                    </strong>
+                    <strong>Durable processing active</strong>
                     <p>
-                      Temporal is indexing and
-                      extracting evidence. This panel
+                      Temporal is indexing and extracting evidence. This panel
                       updates automatically.
                     </p>
                   </div>
                 )}
 
-                {[
-                  "completed",
-                  "rejected",
-                ].includes(
+                {latestReviewRun.status === "failed" && (
+                  <div className="run-failed" role="alert">
+                    <div className="run-failed-heading">
+                      <Icon name="alert" size={14} />
+                      <strong>Review failed</strong>
+                    </div>
+
+                    <p>
+                      {latestReviewRun.failure_code
+                        ? humanize(latestReviewRun.failure_code)
+                        : "The durable workflow reported a failure."}
+                    </p>
+                  </div>
+                )}
+
+                {["completed", "rejected"].includes(
                   latestReviewRun.status,
                 ) && (
                   <div className="decision-complete">
-                    <strong>
-                      Decision recorded
-                    </strong>
+                    <strong>Decision recorded</strong>
                     <p>
-                      This workflow is closed and its
-                      history remains available in the
-                      audit trail.
+                      This workflow is closed and its history remains
+                      available in the audit trail.
                     </p>
                   </div>
                 )}
               </>
             ) : (
               <p className="no-run-message">
-                No durable review has been started for
-                this case.
+                No durable review has been started for this case.
               </p>
             )}
 
-            {(!latestReviewRun ||
-              [
-                "completed",
-                "rejected",
-                "failed",
-              ].includes(
-                latestReviewRun.status,
-              )) && (
-              <button
-                className="start-review-button"
-                type="button"
-                disabled={
-                  actionBusy ||
-                  documents.length === 0
-                }
-                onClick={() => {
-                  void startReview();
-                }}
-              >
-                {actionBusy
-                  ? "Starting review…"
-                  : "Start durable review"}
-              </button>
+            {canStartReview && (
+              <>
+                <button
+                  className="btn btn-primary btn-block start-review-button"
+                  type="button"
+                  disabled={busyAction !== null || documents.length === 0}
+                  onClick={() => {
+                    void startReview();
+                  }}
+                >
+                  {busyAction === "start"
+                    ? "Starting review…"
+                    : latestReviewRun?.status === "failed"
+                      ? "Retry durable review"
+                      : "Start durable review"}
+                </button>
+
+                {documents.length === 0 && !initialLoading && (
+                  <p className="start-review-hint">
+                    Upload at least one document to enable review.
+                  </p>
+                )}
+              </>
             )}
 
             <div className="oversight-note">
-              <strong>
-                Human decision required
-              </strong>
+              <strong>Human decision required</strong>
               <p>
-                CaseLens never approves or rejects a
-                case autonomously. AI output remains
-                evidence-linked and reviewer
-                controlled.
+                CaseLens never approves or rejects a case autonomously. AI
+                output remains evidence-linked and reviewer controlled.
               </p>
             </div>
           </aside>
         </div>
-      </section>
-    </div>
+      </div>
+    </dialog>
   );
 }

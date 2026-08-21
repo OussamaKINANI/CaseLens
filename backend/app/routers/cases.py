@@ -1,7 +1,7 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.audit_models import AuditEventRecord
@@ -11,7 +11,11 @@ from app.audit_schemas import (
     AuditEventType,
 )
 from app.database import get_database_session
+from app.document_models import ClinicalDocumentRecord
+from app.extraction_models import ClinicalExtractionRecord
 from app.models import CaseRecord
+from app.review_models import CaseReviewRunRecord
+from app.review_schemas import ReviewRunStatus
 from app.schemas import (
     CaseCreate,
     CaseRead,
@@ -21,6 +25,13 @@ from app.schemas import (
 
 
 router = APIRouter(prefix="/v1/cases")
+
+
+ACTIVE_REVIEW_RUN_STATUSES: set[ReviewRunStatus] = {
+    ReviewRunStatus.queued,
+    ReviewRunStatus.running,
+    ReviewRunStatus.awaiting_human_review,
+}
 
 
 ALLOWED_STATUS_TRANSITIONS: dict[CaseStatus, set[CaseStatus]] = {
@@ -114,6 +125,79 @@ def get_case(
         )
 
     return case
+
+
+@router.delete(
+    "/{case_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["cases"],
+)
+def delete_case(
+    case_id: UUID,
+    database: Session = Depends(get_database_session),
+) -> Response:
+    case = database.get(CaseRecord, case_id)
+
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+
+    active_run = database.scalar(
+        select(CaseReviewRunRecord.id)
+        .where(
+            CaseReviewRunRecord.case_id == case_id,
+            CaseReviewRunRecord.status.in_(
+                [
+                    run_status.value
+                    for run_status in ACTIVE_REVIEW_RUN_STATUSES
+                ]
+            ),
+        )
+        .limit(1)
+    )
+
+    if active_run is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot delete a case while a durable review "
+                "is in progress. Complete or reject the review "
+                "first."
+            ),
+        )
+
+    # Delete dependents in FK order. Document chunks cascade at the
+    # database level when their owning documents are removed.
+    database.execute(
+        delete(ClinicalExtractionRecord).where(
+            ClinicalExtractionRecord.case_id == case_id,
+        )
+    )
+
+    database.execute(
+        delete(ClinicalDocumentRecord).where(
+            ClinicalDocumentRecord.case_id == case_id,
+        )
+    )
+
+    database.execute(
+        delete(CaseReviewRunRecord).where(
+            CaseReviewRunRecord.case_id == case_id,
+        )
+    )
+
+    database.execute(
+        delete(AuditEventRecord).where(
+            AuditEventRecord.case_id == case_id,
+        )
+    )
+
+    database.delete(case)
+    database.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch(

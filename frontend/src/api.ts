@@ -11,66 +11,72 @@ import type {
 } from "./types";
 
 
+const REQUEST_TIMEOUT_MS = 60_000;
+
 export class ApiError extends Error {
   readonly status: number;
 
-  constructor(
-    message: string,
-    status: number,
-  ) {
+  constructor(message: string, status: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
   }
 }
 
-function jsonOptions(
-  method: string,
-  body?: unknown,
-): RequestInit {
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
+
+function jsonOptions(method: string, body?: unknown): RequestInit {
   return {
     method,
-
     headers: {
       "Content-Type": "application/json",
     },
-
-    body:
-      body === undefined
-        ? undefined
-        : JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   };
 }
 
-async function request<T>(
+async function performRequest(
   path: string,
   options?: RequestInit,
-): Promise<T> {
-  const headers = new Headers(
-    options?.headers,
-  );
+): Promise<Response> {
+  const headers = new Headers(options?.headers);
+  headers.set("Accept", "application/json");
 
-  headers.set(
-    "Accept",
-    "application/json",
-  );
+  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = options?.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
 
-  const response = await fetch(path, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(path, { ...options, headers, signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ApiError(
+        "The request timed out. The service may be busy — try again.",
+        0,
+      );
+    }
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+
+    throw new ApiError(
+      "Could not reach the CaseLens API. Check that the stack is running.",
+      0,
+    );
+  }
 
   if (!response.ok) {
-    let message =
-      `Request failed with status ${response.status}`;
+    let message = `Request failed with status ${response.status}`;
 
     try {
       const body = (await response.json()) as {
-        detail?:
-          | string
-          | Array<{
-              msg?: string;
-            }>;
+        detail?: string | Array<{ msg?: string }>;
       };
 
       if (typeof body.detail === "string") {
@@ -85,8 +91,19 @@ async function request<T>(
       // Keep the generic HTTP error message.
     }
 
+    throw new ApiError(message, response.status);
+  }
+
+  return response;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await performRequest(path, options);
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (response.status === 204 || !contentType.includes("application/json")) {
     throw new ApiError(
-      message,
+      `The API returned an unexpected ${response.status} response.`,
       response.status,
     );
   }
@@ -94,47 +111,59 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-export function getReadiness(): Promise<ReadinessResponse> {
-  return request<ReadinessResponse>(
-    "/ready",
-  );
+async function requestVoid(
+  path: string,
+  options?: RequestInit,
+): Promise<void> {
+  await performRequest(path, options);
 }
 
-export function listCases(): Promise<ClinicalCase[]> {
-  return request<ClinicalCase[]>(
-    "/v1/cases",
-  );
+export function getReadiness(
+  options?: RequestOptions,
+): Promise<ReadinessResponse> {
+  return request<ReadinessResponse>("/ready", options);
+}
+
+export function listCases(
+  options?: RequestOptions,
+): Promise<ClinicalCase[]> {
+  return request<ClinicalCase[]>("/v1/cases", options);
 }
 
 export function listCaseDocuments(
   caseId: string,
+  options?: RequestOptions,
 ): Promise<ClinicalDocument[]> {
   return request<ClinicalDocument[]>(
     `/v1/cases/${caseId}/documents`,
+    options,
   );
 }
 
 export function listCaseExtractions(
   caseId: string,
+  options?: RequestOptions,
 ): Promise<ClinicalExtraction[]> {
   return request<ClinicalExtraction[]>(
     `/v1/cases/${caseId}/extractions`,
+    options,
   );
 }
 
 export function listCaseAuditEvents(
   caseId: string,
+  options?: RequestOptions,
 ): Promise<AuditEvent[]> {
-  return request<AuditEvent[]>(
-    `/v1/cases/${caseId}/audit`,
-  );
+  return request<AuditEvent[]>(`/v1/cases/${caseId}/audit`, options);
 }
 
 export function listCaseReviewRuns(
   caseId: string,
+  options?: RequestOptions,
 ): Promise<CaseReviewRun[]> {
   return request<CaseReviewRun[]>(
     `/v1/cases/${caseId}/review-runs`,
+    options,
   );
 }
 
@@ -145,13 +174,7 @@ export function searchCase(
 ): Promise<CaseSearchResponse> {
   return request<CaseSearchResponse>(
     `/v1/cases/${caseId}/search`,
-    jsonOptions(
-      "POST",
-      {
-        query,
-        top_k: topK,
-      },
-    ),
+    jsonOptions("POST", { query, top_k: topK }),
   );
 }
 
@@ -162,13 +185,7 @@ export function answerCaseQuestion(
 ): Promise<CaseAnswerResponse> {
   return request<CaseAnswerResponse>(
     `/v1/cases/${caseId}/answer`,
-    jsonOptions(
-      "POST",
-      {
-        query,
-        top_k: topK,
-      },
-    ),
+    jsonOptions("POST", { query, top_k: topK }),
   );
 }
 
@@ -178,12 +195,7 @@ export function createCaseReviewRun(
 ): Promise<CaseReviewRun> {
   return request<CaseReviewRun>(
     `/v1/cases/${caseId}/review-runs`,
-    jsonOptions(
-      "POST",
-      {
-        document_ids: documentIds,
-      },
-    ),
+    jsonOptions("POST", { document_ids: documentIds }),
   );
 }
 
@@ -205,15 +217,10 @@ export function submitHumanReview(
 ): Promise<ReviewCommandResponse> {
   return request<ReviewCommandResponse>(
     `/v1/cases/${caseId}/review-runs/${reviewRunId}/human-review`,
-    jsonOptions(
-      "POST",
-      {
-        decision,
-        notes,
-      },
-    ),
+    jsonOptions("POST", { decision, notes }),
   );
 }
+
 export function createClinicalCase(
   patientExternalId: string,
   requestedService: string,
@@ -221,15 +228,16 @@ export function createClinicalCase(
 ): Promise<ClinicalCase> {
   return request<ClinicalCase>(
     "/v1/cases",
-    jsonOptions(
-      "POST",
-      {
-        patient_external_id: patientExternalId,
-        requested_service: requestedService,
-        priority,
-      },
-    ),
+    jsonOptions("POST", {
+      patient_external_id: patientExternalId,
+      requested_service: requestedService,
+      priority,
+    }),
   );
+}
+
+export function deleteClinicalCase(caseId: string): Promise<void> {
+  return requestVoid(`/v1/cases/${caseId}`, { method: "DELETE" });
 }
 
 export function uploadClinicalDocument(
@@ -237,17 +245,10 @@ export function uploadClinicalDocument(
   file: File,
 ): Promise<ClinicalDocument> {
   const formData = new FormData();
+  formData.append("file", file);
 
-  formData.append(
-    "file",
-    file,
-  );
-
-  return request<ClinicalDocument>(
-    `/v1/cases/${caseId}/documents`,
-    {
-      method: "POST",
-      body: formData,
-    },
-  );
+  return request<ClinicalDocument>(`/v1/cases/${caseId}/documents`, {
+    method: "POST",
+    body: formData,
+  });
 }

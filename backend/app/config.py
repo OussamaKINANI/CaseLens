@@ -26,8 +26,12 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
+    # Calibrated for text-embedding-3-small question-vs-chunk retrieval:
+    # relevant paraphrases score ~0.35-0.6, unrelated questions ~0.25-0.30.
+    # This is a coarse pre-filter; the answer provider still refuses when
+    # the retrieved evidence cannot support a cited answer.
     rag_min_similarity: float = Field(
-        default=0.50,
+        default=0.32,
         ge=-1.0,
         le=1.0,
     )

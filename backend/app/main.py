@@ -6,26 +6,11 @@ from app.routers import (
     documents,
     extractions,
     fhir,
-    system,
-)
-
-from app.routers import (
-    cases,
-    documents,
-    extractions,
-    fhir,
-    rag,
-    system,
-)
-from app.routers import (
-    cases,
-    documents,
-    extractions,
-    fhir,
     rag,
     reviews,
     system,
 )
+
 app = FastAPI(
     title=settings.app_name,
     description="Evidence-grounded clinical case review API",

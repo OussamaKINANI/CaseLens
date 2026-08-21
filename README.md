@@ -284,7 +284,7 @@ python -m pytest .\backend\tests -q
 Current local suite:
 
 ```text
-121 passed
+125 passed
 ```
 
 ### Frontend
@@ -359,9 +359,10 @@ Key endpoints include:
 GET  /health
 GET  /ready
 
-POST /v1/cases
-GET  /v1/cases
-GET  /v1/cases/{case_id}
+POST   /v1/cases
+GET    /v1/cases
+GET    /v1/cases/{case_id}
+DELETE /v1/cases/{case_id}
 
 POST /v1/cases/{case_id}/documents
 GET  /v1/cases/{case_id}/documents
