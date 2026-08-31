@@ -15,6 +15,9 @@ The application accepts synthetic clinical documents, extracts structured facts 
 I am adding 
 these two lines
 
+This is a test.
+This line is part of the same test.
+
 ## Highlights
 
 - FastAPI API with strict Pydantic validation
