@@ -748,6 +748,11 @@ function App() {
             </div>
           )}
         </section>
+
+        <footer className="credits-mark" aria-label="Credits">
+          <span className="credits-mark-symbol">CL</span>
+          <span>CaseLens by Oussama Kinani</span>
+        </footer>
       </main>
 
       {selectedCase && (

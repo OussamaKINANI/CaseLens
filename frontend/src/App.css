@@ -205,8 +205,11 @@
 /* ------------- */
 
 .main-content {
+  display: flex;
+  flex-direction: column;
   width: calc(100% - 264px);
   max-width: 1600px;
+  min-height: 100vh;
   padding: 38px 42px 50px;
 }
 
@@ -954,6 +957,36 @@ tbody tr:last-child td {
 
 .empty-state .btn {
   margin-top: 17px;
+}
+
+/* -------- */
+/* Credits  */
+/* -------- */
+
+.credits-mark {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 8px;
+  min-height: 28px;
+  margin-top: auto;
+  padding-top: 22px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.credits-mark-symbol {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 800;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
 }
 
 /* --------------------------- */
