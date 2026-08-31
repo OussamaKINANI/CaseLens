@@ -11,6 +11,10 @@ The application accepts synthetic clinical documents, extracts structured facts 
 > [!IMPORTANT]
 > CaseLens is an educational portfolio project that uses synthetic data only. It is not a medical device, is not clinically validated, and must not be used with real patient information or for diagnosis or treatment decisions.
 
+
+I am adding 
+these two lines
+
 ## Highlights
 
 - FastAPI API with strict Pydantic validation
