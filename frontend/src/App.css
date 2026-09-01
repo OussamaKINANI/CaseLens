@@ -1272,7 +1272,9 @@ dialog.intake-modal.closing {
   letter-spacing: 0.025em;
 }
 
-.intake-form input[type="text"] {
+.intake-form input[type="text"],
+.intake-form input[type="email"],
+.intake-form input[type="password"] {
   width: 100%;
   min-height: 42px;
   padding: 0 12px;
@@ -1283,7 +1285,9 @@ dialog.intake-modal.closing {
   border-radius: var(--radius-sm);
 }
 
-.intake-form input[type="text"]:focus {
+.intake-form input[type="text"]:focus,
+.intake-form input[type="email"]:focus,
+.intake-form input[type="password"]:focus {
   background: var(--surface);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
@@ -2406,6 +2410,172 @@ dialog.review-workspace.closing {
   color: var(--text-faint);
   font-size: 11px;
   line-height: 1.55;
+}
+
+/* --------- */
+/* Sign in   */
+/* --------- */
+
+.signin-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 32px 20px;
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      var(--bg-glow),
+      transparent 32rem
+    ),
+    var(--bg);
+}
+
+.signin-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 30px 30px 26px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+/* The brand block is styled for the dark sidebar, so the sign-in
+   card restates the colours it needs on a light surface. */
+.signin-card .brand {
+  padding: 0 0 24px;
+}
+
+.signin-card .brand strong {
+  color: var(--text-primary);
+}
+
+.signin-card .brand small {
+  color: var(--text-tertiary);
+}
+
+.signin-header h1 {
+  margin: 6px 0 0;
+  font-size: 21px;
+  letter-spacing: -0.02em;
+}
+
+.signin-header > p:last-child {
+  margin: 8px 0 0;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.signin-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 13px;
+  margin-top: 18px;
+  color: var(--info-text);
+  background: var(--info-bg);
+  border-radius: var(--radius-sm);
+}
+
+.signin-notice svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.signin-notice p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.signin-card .intake-error {
+  margin-top: 18px;
+}
+
+.signin-submit {
+  justify-content: center;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 2px;
+}
+
+.signin-footnote {
+  margin: 22px 0 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* ------------------- */
+/* Signed-in reviewer  */
+/* ------------------- */
+
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 11px;
+}
+
+.account-avatar {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: #d9e6e8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+}
+
+.account-identity {
+  min-width: 0;
+}
+
+.account-identity strong,
+.account-identity small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-identity strong {
+  color: #d9e6e8;
+  font-size: 12px;
+}
+
+.account-identity small {
+  margin-top: 2px;
+  color: #7d949b;
+  font-size: 11px;
+}
+
+.account-signout {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  color: #9fb4ba;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.account-signout:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.07);
 }
 
 /* ----------- */

@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
-import { deleteClinicalCase, getReadiness, listCases } from "./api";
+import {
+  deleteClinicalCase,
+  getCurrentReviewer,
+  getReadiness,
+  getSession,
+  listCases,
+  onSessionExpired,
+  signOut,
+} from "./api";
+import type { ReviewerSession } from "./api";
 import { CaseWorkspace } from "./CaseWorkspace";
 import { CaseIntake } from "./CaseIntake";
+import { SignIn } from "./SignIn";
 import { DeleteCaseDialog } from "./components/DeleteCaseDialog";
 import { Icon } from "./components/Icon";
 import { getErrorMessage } from "./lib/errors";
@@ -13,6 +23,7 @@ import type {
   CaseStatus,
   ClinicalCase,
   ReadinessResponse,
+  ReviewerRole,
 } from "./types";
 
 import "./App.css";
@@ -22,6 +33,11 @@ type StatusFilter = "all" | CaseStatus;
 type Theme = "light" | "dark";
 
 const POLL_INTERVAL_MS = 5000;
+
+const ROLE_LABELS: Record<ReviewerRole, string> = {
+  reviewer: "Reviewer",
+  administrator: "Administrator",
+};
 
 const STATUS_LABELS: Record<CaseStatus, string> = {
   received: "Received",
@@ -69,7 +85,24 @@ function SkeletonRow() {
   );
 }
 
+function initials(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length === 0) {
+    return "?";
+  }
+
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
+
+  return `${first}${last}`.toUpperCase();
+}
+
 function App() {
+  const [session, setActiveSession] = useState<ReviewerSession | null>(() =>
+    getSession(),
+  );
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [cases, setCases] = useState<ClinicalCase[]>([]);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [selectedSnapshot, setSelectedSnapshot] =
@@ -93,6 +126,12 @@ function App() {
   const copyResetRef = useRef<number | undefined>(undefined);
 
   const loadDashboard = useCallback(async (options?: LoadOptions) => {
+    // Case data is unreadable without a token, so a signed-out app
+    // waits at the sign-in screen instead of polling for 401s.
+    if (!session) {
+      return;
+    }
+
     const [casesResult, readinessResult] = await Promise.allSettled([
       listCases({ signal: options?.signal }),
       getReadiness({ signal: options?.signal }),
@@ -113,7 +152,40 @@ function App() {
       readinessResult.status === "fulfilled" ? readinessResult.value : null,
     );
     setInitialLoading(false);
+  }, [session]);
+
+  // Any request the API rejects returns the reviewer to sign-in.
+  useEffect(() => {
+    onSessionExpired(() => {
+      setActiveSession(null);
+      setSelectedSnapshot(null);
+      setCases([]);
+      setInitialLoading(true);
+      setSessionNotice("Your session ended. Sign in again to continue.");
+    });
+
+    return () => {
+      onSessionExpired(null);
+    };
   }, []);
+
+  // A token restored from a previous visit may already have expired.
+  // One identity call settles it before the worklist renders.
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    void getCurrentReviewer({ signal: controller.signal }).catch(() => {
+      // A rejected token is cleared by the expiry handler above.
+    });
+
+    return () => {
+      controller.abort();
+    };
+  }, [session]);
 
   const handleManualRefresh = useCallback(() => {
     setRefreshing(true);
@@ -252,6 +324,15 @@ function App() {
     setStatusFilter((current) => (current === status ? "all" : status));
   }
 
+  function handleSignOut() {
+    signOut();
+    setActiveSession(null);
+    setSelectedSnapshot(null);
+    setCases([]);
+    setInitialLoading(true);
+    setSessionNotice(null);
+  }
+
   function toggleTheme() {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
@@ -317,6 +398,23 @@ function App() {
   const showEmptyState = !initialLoading && filteredCases.length === 0;
   const showErrorState = error !== null && cases.length === 0 && !initialLoading;
 
+  if (!session) {
+    return (
+      <SignIn
+        notice={sessionNotice}
+        onSignedIn={(nextSession) => {
+          setSessionNotice(null);
+          setInitialLoading(true);
+          setActiveSession(nextSession);
+        }}
+      />
+    );
+  }
+
+  // The API enforces this too; hiding the control keeps reviewers from
+  // reaching for an action that would come back as 403.
+  const canDeleteCases = session.reviewer.role === "administrator";
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -353,6 +451,27 @@ function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <div className="account-card">
+            <span className="account-avatar" aria-hidden="true">
+              {initials(session.reviewer.full_name)}
+            </span>
+
+            <div className="account-identity">
+              <strong>{session.reviewer.full_name}</strong>
+              <small>{ROLE_LABELS[session.reviewer.role]}</small>
+            </div>
+
+            <button
+              className="account-signout"
+              type="button"
+              onClick={handleSignOut}
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <Icon name="sign-out" size={14} />
+            </button>
+          </div>
+
           <div className="environment-card">
             <span
               className={
@@ -683,19 +802,21 @@ function App() {
                                 View
                               </button>
 
-                              <button
-                                className="row-action danger"
-                                type="button"
-                                aria-label={`Delete case ${clinicalCase.patient_external_id}`}
-                                title="Delete case"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setDeleteError(null);
-                                  setPendingDelete(clinicalCase);
-                                }}
-                              >
-                                <Icon name="trash" size={13} />
-                              </button>
+                              {canDeleteCases && (
+                                <button
+                                  className="row-action danger"
+                                  type="button"
+                                  aria-label={`Delete case ${clinicalCase.patient_external_id}`}
+                                  title="Delete case"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setDeleteError(null);
+                                    setPendingDelete(clinicalCase);
+                                  }}
+                                >
+                                  <Icon name="trash" size={13} />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

@@ -14,6 +14,7 @@ The application accepts synthetic clinical documents, extracts structured facts 
 ## Highlights
 
 - FastAPI API with strict Pydantic validation
+- Signed-token reviewer authentication and role-based authorization
 - PostgreSQL persistence and Alembic migrations
 - `pgvector` case-scoped semantic retrieval
 - Configurable fake and OpenAI providers
@@ -114,6 +115,21 @@ When no chunk satisfies the configured relevance threshold, CaseLens does not ca
 Insufficient evidence in the indexed case documents.
 ```
 
+### Access control
+
+Every endpoint that touches case data requires an authenticated
+reviewer. Only the health probes and the sign-in route are public.
+
+Access tokens are short-lived, signed with `JWT_SECRET_KEY`, and
+carry the reviewer identity. Passwords are stored as salted
+PBKDF2-HMAC-SHA256 hashes and never leave the database.
+
+Reviewers hold one of two roles. Both can create cases, read
+evidence, and approve or reject reviews; deleting a case, which
+destroys its audit history, is reserved for `administrator`. The
+stored role is authoritative, so a token issued before a role change
+cannot outlive it.
+
 ### Human authority
 
 CaseLens does not autonomously approve or reject clinical cases. Final decisions require an explicit human-review action and are written to the audit history.
@@ -129,6 +145,7 @@ Clinical documents are treated as untrusted data. Provider prompts explicitly pr
 | Frontend | React, TypeScript, Vite |
 | Frontend runtime | Nginx |
 | API | FastAPI, Pydantic |
+| Authentication | Signed JWT access tokens, PBKDF2 password hashing |
 | Persistence | PostgreSQL, SQLAlchemy |
 | Vector search | pgvector |
 | Migrations | Alembic |
@@ -161,6 +178,22 @@ Copy-Item .\.env.example .\.env
 ```
 
 The default example uses fake providers and does not require an API key.
+
+It also defines the bootstrap reviewer account and a placeholder
+token-signing key:
+
+```dotenv
+JWT_SECRET_KEY=change-me-to-a-long-random-signing-key
+SEED_REVIEWER_EMAIL=reviewer@caselens.local
+SEED_REVIEWER_PASSWORD=change-me-reviewer
+```
+
+Change the password and generate your own signing key before running
+CaseLens anywhere other than your own machine:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
 
 For real OpenAI extraction, answers, and embeddings, edit `.env` locally:
 
@@ -205,7 +238,7 @@ Named PostgreSQL and Temporal volumes are preserved by this command.
 
 ## Demonstration flow
 
-1. Open `http://127.0.0.1:3000`.
+1. Open `http://127.0.0.1:3000` and sign in with the seeded reviewer account.
 2. Select **New case**.
 3. Enter a synthetic patient reference.
 4. Select a requested service and priority.
@@ -244,6 +277,7 @@ python -m pip install `
 
 Set-Location .\backend
 python -m alembic upgrade head
+python -m app.seed_reviewers
 
 python -m uvicorn `
     app.main:app `
@@ -275,7 +309,7 @@ The development frontend is available at `http://localhost:5173`.
 
 ### Backend
 
-The backend suite includes schema validation, API behavior, database persistence, audit events, evidence verification, extraction, RAG indexing and retrieval, relevance thresholds, workflow records, Activities, gateway behavior, and Worker model registration.
+The backend suite includes schema validation, API behavior, authentication and authorization, database persistence, audit events, evidence verification, extraction, RAG indexing and retrieval, relevance thresholds, workflow records, Activities, gateway behavior, and Worker model registration.
 
 ```powershell
 python -m pytest .\backend\tests -q
@@ -284,7 +318,7 @@ python -m pytest .\backend\tests -q
 Current local suite:
 
 ```text
-125 passed
+161 passed
 ```
 
 ### Frontend
@@ -359,6 +393,9 @@ Key endpoints include:
 GET  /health
 GET  /ready
 
+POST /v1/auth/login
+GET  /v1/auth/me
+
 POST   /v1/cases
 GET    /v1/cases
 GET    /v1/cases/{case_id}
@@ -422,7 +459,7 @@ CaseLens/
 
 CaseLens is intentionally a portfolio demonstration. It currently does not provide:
 
-- User authentication or role-based authorization
+- Reviewer self-service account management, password reset, or MFA
 - Production secret management
 - Encryption-key management
 - Multi-tenant isolation
