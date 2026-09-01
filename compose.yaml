@@ -18,6 +18,16 @@ x-backend-environment: &backend-environment
 
   RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.32}
 
+  JWT_SECRET_KEY: >-
+    ${JWT_SECRET_KEY:-caselens-development-only-secret-change-me}
+
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+
+  SEED_REVIEWER_EMAIL: ${SEED_REVIEWER_EMAIL:-}
+  SEED_REVIEWER_PASSWORD: ${SEED_REVIEWER_PASSWORD:-}
+  SEED_REVIEWER_FULL_NAME: ${SEED_REVIEWER_FULL_NAME:-CaseLens Reviewer}
+  SEED_REVIEWER_ROLE: ${SEED_REVIEWER_ROLE:-administrator}
+
   TEMPORAL_ADDRESS: temporal:7233
   TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
   TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-caselens-review}
@@ -98,13 +108,13 @@ services:
     environment:
       <<: *backend-environment
 
+    # Migrations first, then the bootstrap reviewer account so the
+    # interface has something to sign in with. Seeding is idempotent.
     command:
       [
-        "python",
-        "-m",
-        "alembic",
-        "upgrade",
-        "head",
+        "sh",
+        "-c",
+        "python -m alembic upgrade head && python -m app.seed_reviewers",
       ]
 
     depends_on:

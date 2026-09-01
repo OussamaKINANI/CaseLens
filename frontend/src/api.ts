@@ -1,4 +1,5 @@
 import type {
+  AccessTokenResponse,
   AuditEvent,
   CaseAnswerResponse,
   CaseReviewRun,
@@ -7,11 +8,76 @@ import type {
   ClinicalDocument,
   ClinicalExtraction,
   ReadinessResponse,
+  Reviewer,
   ReviewCommandResponse,
 } from "./types";
 
 
 const REQUEST_TIMEOUT_MS = 60_000;
+
+const SESSION_STORAGE_KEY = "caselens-session";
+
+export interface ReviewerSession {
+  accessToken: string;
+  reviewer: Reviewer;
+}
+
+function readStoredSession(): ReviewerSession | null {
+  try {
+    const stored = window.localStorage.getItem(SESSION_STORAGE_KEY);
+
+    if (!stored) {
+      return null;
+    }
+
+    const parsed = JSON.parse(stored) as Partial<ReviewerSession>;
+
+    if (
+      typeof parsed.accessToken !== "string" ||
+      typeof parsed.reviewer?.id !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      accessToken: parsed.accessToken,
+      reviewer: parsed.reviewer,
+    };
+  } catch {
+    // A corrupt or unavailable store simply means "signed out".
+    return null;
+  }
+}
+
+let activeSession: ReviewerSession | null = readStoredSession();
+let sessionExpiredHandler: (() => void) | null = null;
+
+export function getSession(): ReviewerSession | null {
+  return activeSession;
+}
+
+function setSession(session: ReviewerSession | null): void {
+  activeSession = session;
+
+  try {
+    if (session) {
+      window.localStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify(session),
+      );
+    } else {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // Persisting the session is best-effort; it still works in memory.
+  }
+}
+
+// Lets the app return to the sign-in screen when the API rejects a
+// token that was still stored locally.
+export function onSessionExpired(handler: (() => void) | null): void {
+  sessionExpiredHandler = handler;
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -44,6 +110,14 @@ async function performRequest(
   const headers = new Headers(options?.headers);
   headers.set("Accept", "application/json");
 
+  const session = activeSession;
+  let usesStoredToken = false;
+
+  if (session && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${session.accessToken}`);
+    usesStoredToken = true;
+  }
+
   const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const signal = options?.signal
     ? AbortSignal.any([options.signal, timeoutSignal])
@@ -72,6 +146,12 @@ async function performRequest(
   }
 
   if (!response.ok) {
+    if (response.status === 401 && usesStoredToken) {
+      // The token expired, was revoked, or the account was disabled.
+      setSession(null);
+      sessionExpiredHandler?.();
+    }
+
     let message = `Request failed with status ${response.status}`;
 
     try {
@@ -116,6 +196,35 @@ async function requestVoid(
   options?: RequestInit,
 ): Promise<void> {
   await performRequest(path, options);
+}
+
+export async function signIn(
+  email: string,
+  password: string,
+): Promise<ReviewerSession> {
+  const response = await request<AccessTokenResponse>(
+    "/v1/auth/login",
+    jsonOptions("POST", { email, password }),
+  );
+
+  const session: ReviewerSession = {
+    accessToken: response.access_token,
+    reviewer: response.reviewer,
+  };
+
+  setSession(session);
+
+  return session;
+}
+
+export function signOut(): void {
+  setSession(null);
+}
+
+export function getCurrentReviewer(
+  options?: RequestOptions,
+): Promise<Reviewer> {
+  return request<Reviewer>("/v1/auth/me", options);
 }
 
 export function getReadiness(

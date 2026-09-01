@@ -1,3 +1,21 @@
+export type ReviewerRole = "reviewer" | "administrator";
+
+export interface Reviewer {
+  id: string;
+  email: string;
+  full_name: string;
+  role: ReviewerRole;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AccessTokenResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in_seconds: number;
+  reviewer: Reviewer;
+}
+
 export type CasePriority = "routine" | "urgent";
 
 export type CaseStatus =

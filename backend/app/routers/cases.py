@@ -5,6 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.audit_models import AuditEventRecord
+from app.auth import require_administrator
 from app.audit_schemas import (
     AuditActorType,
     AuditEventRead,
@@ -131,6 +132,9 @@ def get_case(
     "/{case_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     tags=["cases"],
+    # Deleting a case destroys its audit history, so it is the one
+    # action reserved for administrators.
+    dependencies=[Depends(require_administrator)],
 )
 def delete_case(
     case_id: UUID,

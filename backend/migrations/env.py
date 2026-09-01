@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app import (
     audit_models,
+    auth_models,
     document_models,
     extraction_models,
     models,
