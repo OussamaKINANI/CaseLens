@@ -30,5 +30,7 @@ class AuditEventRead(BaseModel):
     case_id: UUID
     event_type: AuditEventType
     actor_type: AuditActorType
+    actor_id: UUID | None
+    actor_label: str | None
     details: dict[str, Any]
     created_at: datetime

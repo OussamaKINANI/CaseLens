@@ -10,6 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_reviewer
+from app.auth_models import ReviewerRecord
 from app.database import get_database_session
 from app.document_models import ClinicalDocumentRecord
 from app.models import CaseRecord
@@ -207,6 +209,9 @@ def submit_case_human_review(
     review_run_id: UUID,
     payload: HumanReviewRequest,
     database: Session = Depends(get_database_session),
+    reviewer: ReviewerRecord = Depends(
+        get_current_reviewer
+    ),
     gateway: ReviewWorkflowGateway = Depends(
         get_review_workflow_gateway
     ),
@@ -240,6 +245,10 @@ def submit_case_human_review(
                 review=HumanReviewUpdate(
                     decision=payload.decision.value,
                     notes=payload.notes,
+                    reviewer_id=str(reviewer.id),
+                    reviewer_label=(
+                        reviewer.full_name
+                    ),
                 ),
             )
         )

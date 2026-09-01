@@ -132,6 +132,8 @@ class CaseReviewActivities:
         review_run: CaseReviewRunRecord,
         new_status: str,
         actor_type: AuditActorType,
+        actor_id: UUID | None = None,
+        actor_label: str | None = None,
     ) -> None:
         previous_status = case.status
 
@@ -147,6 +149,8 @@ class CaseReviewActivities:
                     AuditEventType.status_changed.value
                 ),
                 actor_type=actor_type.value,
+                actor_id=actor_id,
+                actor_label=actor_label,
                 details={
                     "entity_type": "case",
                     "source": "case_review_workflow",
@@ -417,6 +421,31 @@ class CaseReviewActivities:
                     non_retryable=True,
                 )
 
+            if not activity_input.reviewer_id:
+                raise ApplicationError(
+                    "Reviewer identity is required",
+                    type="MissingReviewerIdentity",
+                    non_retryable=True,
+                )
+
+            try:
+                reviewer_id = UUID(
+                    activity_input.reviewer_id
+                )
+            except ValueError as error:
+                raise ApplicationError(
+                    "Invalid reviewer identifier",
+                    type="InvalidReviewerIdentity",
+                    non_retryable=True,
+                ) from error
+
+            if not activity_input.reviewer_label:
+                raise ApplicationError(
+                    "Reviewer label is required",
+                    type="MissingReviewerIdentity",
+                    non_retryable=True,
+                )
+
             case = self._get_parent_case(
                 database,
                 review_run,
@@ -449,6 +478,10 @@ class CaseReviewActivities:
                     actor_type=(
                         AuditActorType.reviewer.value
                     ),
+                    actor_id=reviewer_id,
+                    actor_label=(
+                        activity_input.reviewer_label
+                    ),
                     details={
                         "review_run_id": str(
                             review_run.id
@@ -471,6 +504,8 @@ class CaseReviewActivities:
                 review_run=review_run,
                 new_status=CaseStatus.completed.value,
                 actor_type=AuditActorType.reviewer,
+                actor_id=reviewer_id,
+                actor_label=activity_input.reviewer_label,
             )
 
             database.commit()

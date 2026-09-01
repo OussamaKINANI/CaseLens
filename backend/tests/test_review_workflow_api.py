@@ -12,7 +12,10 @@ from app.review_workflow_gateway import (
     get_review_workflow_gateway,
 )
 from app.temporal_models import ReviewRunActivityInput
-from tests.conftest import TestSessionLocal
+from tests.conftest import (
+    REVIEWER_ID,
+    TestSessionLocal,
+)
 
 
 @pytest.fixture
@@ -106,11 +109,11 @@ def test_start_review_sends_workflow(
 
 
 def test_human_review_sends_validated_update(
-    client: TestClient,
+    reviewer_client: TestClient,
     workflow_gateway: FakeReviewWorkflowGateway,
 ) -> None:
     case, _, review_run = create_review_run(
-        client
+        reviewer_client
     )
 
     activities = CaseReviewActivities(
@@ -129,7 +132,7 @@ def test_human_review_sends_validated_update(
         activity_input
     )
 
-    response = client.post(
+    response = reviewer_client.post(
         f"/v1/cases/{case['id']}/review-runs/"
         f"{review_run['id']}/human-review",
         json={
@@ -144,6 +147,8 @@ def test_human_review_sends_validated_update(
     _, review = workflow_gateway.human_reviews[0]
 
     assert review.decision == "approve"
+    assert review.reviewer_id == str(REVIEWER_ID)
+    assert review.reviewer_label == "Test Reviewer"
 
 
 def test_human_review_requires_awaiting_status(

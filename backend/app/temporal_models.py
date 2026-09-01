@@ -44,6 +44,8 @@ class ReviewDocumentExtractionResult:
 class HumanReviewUpdate:
     decision: str
     notes: str | None = None
+    reviewer_id: str | None = None
+    reviewer_label: str | None = None
 
 
 @dataclass
@@ -51,6 +53,8 @@ class FinalizeReviewActivityInput:
     review_run_id: str
     decision: str
     notes: str | None = None
+    reviewer_id: str | None = None
+    reviewer_label: str | None = None
 
 
 @dataclass

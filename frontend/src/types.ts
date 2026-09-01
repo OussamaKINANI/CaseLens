@@ -103,6 +103,8 @@ export interface AuditEvent {
   case_id: string;
   event_type: string;
   actor_type: "system" | "reviewer";
+  actor_id: string | null;
+  actor_label: string | null;
   details: Record<string, unknown>;
   created_at: string;
 }

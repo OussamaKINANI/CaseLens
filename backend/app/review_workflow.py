@@ -187,6 +187,10 @@ class CaseReviewWorkflow:
                     ),
                     decision=human_review.decision,
                     notes=human_review.notes,
+                    reviewer_id=human_review.reviewer_id,
+                    reviewer_label=(
+                        human_review.reviewer_label
+                    ),
                 ),
                 start_to_close_timeout=(
                     CONTROL_ACTIVITY_TIMEOUT
@@ -249,6 +253,14 @@ class CaseReviewWorkflow:
         ):
             raise ValueError(
                 "notes are required when rejecting"
+            )
+
+        if (
+            not review.reviewer_id
+            or not review.reviewer_label
+        ):
+            raise ValueError(
+                "reviewer identity is required"
             )
 
         if self._human_review is not None:

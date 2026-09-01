@@ -4,6 +4,22 @@ from app.review_workflow import CaseReviewWorkflow
 from app.temporal_models import HumanReviewUpdate
 
 
+REVIEWER_ID = "11111111-1111-4111-8111-111111111111"
+REVIEWER_LABEL = "Test Reviewer"
+
+
+def human_review_update(
+    decision: str,
+    notes: str | None = None,
+) -> HumanReviewUpdate:
+    return HumanReviewUpdate(
+        decision=decision,
+        notes=notes,
+        reviewer_id=REVIEWER_ID,
+        reviewer_label=REVIEWER_LABEL,
+    )
+
+
 def test_workflow_starts_in_created_phase() -> None:
     review_workflow = CaseReviewWorkflow()
 
@@ -13,9 +29,7 @@ def test_workflow_starts_in_created_phase() -> None:
 def test_human_approval_is_accepted() -> None:
     review_workflow = CaseReviewWorkflow()
 
-    update = HumanReviewUpdate(
-        decision="approve",
-    )
+    update = human_review_update("approve")
 
     review_workflow.validate_human_review(update)
 
@@ -34,9 +48,7 @@ def test_rejection_requires_notes() -> None:
         match="notes are required",
     ):
         review_workflow.validate_human_review(
-            HumanReviewUpdate(
-                decision="reject",
-            )
+            human_review_update("reject")
         )
 
 
@@ -48,8 +60,20 @@ def test_invalid_decision_is_rejected() -> None:
         match="decision must be approve or reject",
     ):
         review_workflow.validate_human_review(
+            human_review_update("override")
+        )
+
+
+def test_reviewer_identity_is_required() -> None:
+    review_workflow = CaseReviewWorkflow()
+
+    with pytest.raises(
+        ValueError,
+        match="reviewer identity is required",
+    ):
+        review_workflow.validate_human_review(
             HumanReviewUpdate(
-                decision="override",
+                decision="approve",
             )
         )
 
@@ -57,9 +81,7 @@ def test_invalid_decision_is_rejected() -> None:
 def test_second_human_decision_is_rejected() -> None:
     review_workflow = CaseReviewWorkflow()
 
-    first_update = HumanReviewUpdate(
-        decision="approve",
-    )
+    first_update = human_review_update("approve")
 
     review_workflow.validate_human_review(
         first_update
@@ -74,7 +96,5 @@ def test_second_human_decision_is_rejected() -> None:
         match="decision already exists",
     ):
         review_workflow.validate_human_review(
-            HumanReviewUpdate(
-                decision="approve",
-            )
+            human_review_update("approve")
         )
