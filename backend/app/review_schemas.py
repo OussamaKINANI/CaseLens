@@ -11,6 +11,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.review_limits import MAX_REVIEW_DOCUMENTS
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(
@@ -36,7 +38,7 @@ class HumanReviewDecision(str, Enum):
 class CaseReviewRunCreate(StrictModel):
     document_ids: list[UUID] = Field(
         min_length=1,
-        max_length=50,
+        max_length=MAX_REVIEW_DOCUMENTS,
     )
 
     @field_validator("document_ids")

@@ -11,11 +11,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import (
     ARRAY,
+)
+from sqlalchemy.dialects.postgresql import (
     UUID as PostgreSQLUUID,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.review_limits import MAX_REVIEW_DOCUMENTS
 from app.review_schemas import ReviewRunStatus
 
 
@@ -37,7 +40,8 @@ class CaseReviewRunRecord(Base):
             name="ck_case_review_runs_status",
         ),
         CheckConstraint(
-            "cardinality(document_ids) BETWEEN 1 AND 50",
+            "cardinality(document_ids) BETWEEN 1 AND "
+            f"{MAX_REVIEW_DOCUMENTS}",
             name="ck_case_review_runs_document_count",
         ),
         UniqueConstraint(

@@ -311,14 +311,16 @@ The development frontend is available at `http://localhost:5173`.
 
 The backend suite includes schema validation, API behavior, authentication and authorization, database persistence, audit events, evidence verification, extraction, RAG indexing and retrieval, relevance thresholds, workflow records, Activities, gateway behavior, and Worker model registration.
 
+The review workflow is also executed inside Temporal's ephemeral time-skipping test server, covering Activity dispatch, the human-review Update and its validator, retry policies, the failure path, the gateway's start and Update calls, Worker startup, and replay determinism. The test-server version is pinned in `backend/tests/temporal_support.py` and cached in CI, so those tests need neither an external Temporal service nor the database. Database-backed backend tests need PostgreSQL with pgvector.
+
 ```powershell
 python -m pytest .\backend\tests -q
 ```
 
-Current local suite:
+Current suite size:
 
 ```text
-161 passed
+178 tests
 ```
 
 ### Frontend
