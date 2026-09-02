@@ -47,9 +47,17 @@ jobs:
       EMBEDDING_PROVIDER: fake
       EMBEDDING_DIMENSIONS: "1536"
 
+      # Workflow tests run against Temporal's ephemeral local
+      # time-skipping test server, so no external service is
+      # needed here. These only configure the application.
       TEMPORAL_ADDRESS: localhost:7233
       TEMPORAL_NAMESPACE: default
       TEMPORAL_TASK_QUEUE: caselens-review
+
+      # Cached between runs, so the pinned test server binary is
+      # downloaded once. The version lives in
+      # backend/tests/temporal_support.py.
+      TEMPORAL_TEST_SERVER_DIR: ~/.cache/caselens/temporal-test-server
 
     steps:
       - name: Check out repository
@@ -67,6 +75,19 @@ jobs:
         run: >-
           python -m pip install
           --requirement backend/requirements.txt
+
+      - name: Cache Temporal test server
+        uses: actions/cache@v6
+
+        with:
+          path: ~/.cache/caselens/temporal-test-server
+
+          key: >-
+            temporal-test-server-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('backend/tests/temporal_support.py') }}
+
+          restore-keys: |
+            temporal-test-server-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Create test database
         run: |
