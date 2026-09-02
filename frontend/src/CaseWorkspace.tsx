@@ -1019,7 +1019,10 @@ export function CaseWorkspace({
                               <div className="audit-heading">
                                 <strong>{humanize(event.event_type)}</strong>
 
-                                <span>{event.actor_type}</span>
+                                <span>
+                                  {event.actor_label ??
+                                    humanize(event.actor_type)}
+                                </span>
                               </div>
 
                               <time>{formatDate(event.created_at)}</time>

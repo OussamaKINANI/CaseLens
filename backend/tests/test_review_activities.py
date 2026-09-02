@@ -11,7 +11,10 @@ from app.temporal_models import (
     FinalizeReviewActivityInput,
     ReviewRunActivityInput,
 )
-from tests.conftest import TestSessionLocal
+from tests.conftest import (
+    ADMINISTRATOR_ID,
+    TestSessionLocal,
+)
 
 
 def create_review_run(
@@ -122,6 +125,8 @@ def test_review_activities_complete_approved_run(
         FinalizeReviewActivityInput(
             review_run_id=review_run["id"],
             decision="approve",
+            reviewer_id=str(ADMINISTRATOR_ID),
+            reviewer_label="Test Administrator",
         )
     )
 
@@ -161,6 +166,20 @@ def test_review_activities_complete_approved_run(
             == review_run["id"]
         )
     ]
+
+    human_review_event = next(
+        event
+        for event in audit_response.json()
+        if event["event_type"]
+        == "human_review_completed"
+    )
+
+    assert human_review_event["actor_type"] == "reviewer"
+    assert human_review_event["actor_id"] == str(ADMINISTRATOR_ID)
+    assert (
+        human_review_event["actor_label"]
+        == "Test Administrator"
+    )
 
     assert case_statuses == [
         "processing",
@@ -293,6 +312,8 @@ def test_rejection_notes_are_hashed_in_audit(
                 notes=(
                     "Synthetic rejection reason"
                 ),
+                reviewer_id=str(ADMINISTRATOR_ID),
+                reviewer_label="Test Administrator",
             )
         )
     )
@@ -320,6 +341,11 @@ def test_rejection_notes_are_hashed_in_audit(
     assert human_review_event["details"][
         "decision"
     ] == "reject"
+    assert human_review_event["actor_id"] == str(ADMINISTRATOR_ID)
+    assert (
+        human_review_event["actor_label"]
+        == "Test Administrator"
+    )
 
     assert human_review_event["details"][
         "notes_sha256"

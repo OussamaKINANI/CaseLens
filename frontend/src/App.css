@@ -2205,7 +2205,6 @@ dialog.review-workspace.closing {
   font-weight: 700;
   background: var(--surface-sunken);
   border-radius: 4px;
-  text-transform: uppercase;
 }
 
 .audit-timeline article.reviewer-event .audit-heading span {

@@ -67,6 +67,18 @@ class AuditEventRecord(Base):
         default=AuditActorType.system.value,
     )
 
+    actor_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("reviewers.id"),
+        nullable=True,
+        index=True,
+    )
+
+    actor_label: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+    )
+
     details: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
